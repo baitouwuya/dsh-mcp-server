@@ -24,6 +24,8 @@ const EXPECTED_TOOLS = [
   'dsh_list_sessions',
   'dsh_read_session',
   'dsh_cancel_session',
+  'dsh_archive_session',
+  'dsh_unarchive_session',
   'dsh_list_tools',
   'dsh_status',
 ]
@@ -160,6 +162,31 @@ oh('resources/read dsh://session/{id} returns the same transcript')
 const sessionList = await call('dsh_list_sessions', { limit: 50 })
 assert.ok(sessionList.sessions.some((session) => session.sessionId === run.sessionId))
 oh('dsh_list_sessions includes the session the MCP endpoint started')
+
+// --- archive ----------------------------------------------------------------
+const beforeArchive = await call('dsh_list_sessions', { limit: 200 })
+assert.ok(beforeArchive.sessions.some((session) => session.sessionId === run.sessionId && session.archived === false))
+oh('dsh_list_sessions marks a live session as not archived')
+
+const archived = await call('dsh_archive_session', { sessionId: run.sessionId })
+assert.equal(archived.archived, true)
+const hiddenList = await call('dsh_list_sessions', { limit: 200 })
+assert.ok(!hiddenList.sessions.some((session) => session.sessionId === run.sessionId))
+oh('dsh_archive_session hides the session from the default listing')
+
+const withArchived = await call('dsh_list_sessions', { limit: 200, includeArchived: true })
+assert.ok(withArchived.sessions.some((session) => session.sessionId === run.sessionId && session.archived === true))
+oh('dsh_list_sessions includeArchived reveals the archived session')
+
+const archivedTranscript = await call('dsh_read_session', { sessionId: run.sessionId, limit: 0 })
+assert.ok(archivedTranscript.messages.length > 0)
+oh('an archived session keeps a readable transcript')
+
+const unarchived = await call('dsh_unarchive_session', { sessionId: run.sessionId })
+assert.equal(unarchived.archived, false)
+const restoredList = await call('dsh_list_sessions', { limit: 200 })
+assert.ok(restoredList.sessions.some((session) => session.sessionId === run.sessionId && session.archived === false))
+oh('dsh_unarchive_session restores the session to the listing')
 
 const detached = await call('dsh_run_prompt', {
   prompt: 'Count slowly from 1 to 500, one number per line. Do not use any tools.',

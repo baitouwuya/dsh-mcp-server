@@ -18,11 +18,17 @@ other harness ──MCP (Streamable HTTP or stdio)──> DSH MCP Server ──>
 |---|---|
 | `dsh_run_prompt` | Start a **new** DSH session and run one prompt; returns the assistant's final text and the new `sessionId`. Supports `cwd`, `agentPreset`, `model` (`provider/model`), `wait: false`, `timeoutMs`. |
 | `dsh_continue_session` | Send a prompt to an **existing** session (resuming it if it is cold). Keeps the session's context and workspace. |
-| `dsh_list_sessions` | Visible sessions with title, cwd, running state, and last activity. |
-| `dsh_read_session` | Ordered `{ role, text, seq }` transcript of one session (user-authored and assistant messages only). |
+| `dsh_list_sessions` | Visible sessions with title, cwd, running state, archival state, and last activity. Archived sessions are hidden unless `includeArchived: true`, mirroring the Web UI. |
+| `dsh_read_session` | Ordered `{ role, text, seq }` transcript of one session (user-authored and assistant messages only). Works while the session is archived. |
 | `dsh_cancel_session` | Cancel the active turn of a session without dropping its pending inbox. |
+| `dsh_archive_session` | Archive one session durably: hidden from every grouping surface, and it cannot run a model step until restored. A session with running work is refused unless `stopActivity: true` (which archives first, then stops that work). Archiving drops the pin. |
+| `dsh_unarchive_session` | Drop a session from the archive set; it is listed again and returns to its recorded workspace position. |
 | `dsh_list_tools` | The tools DSH exposes to its own agents, for choosing what a delegated prompt can do. |
 | `dsh_status` | Endpoint, profile, version, session/live-agent counts, default model, active turns. |
+
+Archival needs the Host's `workspaceRegistry` service (`@deepseek-ai/dsh-workspace`). Without it the
+two archive tools report that the service is unavailable and listings simply omit the `archived`
+field instead of guessing.
 
 Resources: `dsh://status`, `dsh://sessions`, and the template `dsh://session/{sessionId}`.
 
@@ -171,11 +177,11 @@ Its `cordis.patch.yml` bearer token must match the server's configured token.
 
 ```bash
 node test/mcp-self-test.mjs            # 11 transport checks, no Harness needed
-node test/plugin-integration-test.mjs  # 10 checks: apply(), endpoint file, tools, transcript filter,
-                                       # hot-reload endpoint ownership
+node test/plugin-integration-test.mjs  # 17 checks: apply(), endpoint file, tools, transcript filter,
+                                       # archival tools, hot-reload endpoint ownership
 node test/stdio-bridge-test.mjs        # 4 checks, needs a RUNNING Harness (one real delegated turn)
-node test/live-e2e-test.mjs            # 22 checks over HTTP: protocol, resources, all seven tools,
-                                       # error paths, 3 real turns (needs a RUNNING Harness)
+node test/live-e2e-test.mjs            # 28 checks over HTTP: protocol, resources, all nine tools,
+                                       # archive/unarchive, error paths, 3 real turns (needs a Harness)
 ```
 
 Live checks used during development also covered: a real MCP client exchange against the running

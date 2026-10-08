@@ -110,22 +110,41 @@ function makeServices() {
     },
   }
 
+  /** Fake workspace registry: the archive set plus a busy flag for the refusal path. */
+  const archived = new Set()
+  let busy = false
+  const workspaceRegistry = {
+    get archivedSessionIds() { return [...archived] },
+    async archiveSession(id, options) {
+      if (!options?.stopActivity && busy) {
+        const error = new Error(`Session "${id}" still has running work`)
+        error.name = 'WorkspaceActiveSessionError'
+        throw error
+      }
+      archived.add(id)
+    },
+    async unarchiveSession(id) { archived.delete(id) },
+  }
+
   return {
     services: {
       sessionController,
       sessionQuery,
       webServer,
+      workspaceRegistry,
       tools: { schemas: () => [{ name: 'read_file', description: 'Read a file' }] },
       agentDefaultModel: { currentSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-v4.1-flash-anthropic' }) },
     },
     webServer,
     getPrompt: () => pendingPrompt,
+    setBusy: (value) => { busy = value },
+    archivedIds: () => [...archived],
   }
 }
 
 const dir = await mkdtemp(join(tmpdir(), 'dsh-mcp-test-'))
 const endpointFile = join(dir, 'dsh-mcp-endpoint.json')
-const { services, webServer, getPrompt } = makeServices()
+const { services, webServer, getPrompt, setBusy, archivedIds } = makeServices()
 let sessionIdFromRun
 const disposers = []
 const ctx = makeContext(services, disposers)
@@ -187,12 +206,48 @@ try {
 
   const status = await call('dsh_status', {})
   assert.equal(status.defaultModel.model, 'deepseek-v4.1-flash-anthropic')
-  assert.equal(status.toolNames.length, 7)
+  assert.equal(status.toolNames.length, 9)
   checks.push('dsh_status reports the default model and tool names')
 
   const tools = await call('dsh_list_tools', {})
   assert.equal(tools.tools[0].name, 'read_file')
   checks.push('dsh_list_tools lists native Harness tools')
+
+  const listedBefore = await call('dsh_list_sessions', { limit: 5 })
+  assert.equal(listedBefore.sessions[0].archived, false)
+  checks.push('dsh_list_sessions reports archival state')
+
+  setBusy(true)
+  const refused = await rpc({ jsonrpc: '2.0', id: ++id, method: 'tools/call', params: { name: 'dsh_archive_session', arguments: { sessionId: sessionIdFromRun } } })
+  assert.ok(refused.result?.isError, 'a session with running work must refuse a plain archive')
+  assert.match(refused.result.content[0].text, /stopActivity/)
+  checks.push('dsh_archive_session refuses running work and names stopActivity')
+
+  const stopped = await call('dsh_archive_session', { sessionId: sessionIdFromRun, stopActivity: true })
+  assert.equal(stopped.archived, true)
+  assert.equal(archivedIds().includes(sessionIdFromRun), true)
+  setBusy(false)
+  checks.push('dsh_archive_session archives with stopActivity')
+
+  const hidden = await call('dsh_list_sessions', { limit: 5 })
+  assert.equal(hidden.count, 0)
+  assert.equal(hidden.archivedHidden, 1)
+  checks.push('dsh_list_sessions hides archived sessions by default')
+
+  const withArchived = await call('dsh_list_sessions', { limit: 5, includeArchived: true })
+  assert.equal(withArchived.sessions[0].archived, true)
+  checks.push('dsh_list_sessions includeArchived marks sessions archived')
+
+  const archivedRead = await call('dsh_read_session', { sessionId: sessionIdFromRun, limit: 0 })
+  assert.ok(archivedRead.messages.length > 0)
+  checks.push('a transcript stays readable while its session is archived')
+
+  const restored = await call('dsh_unarchive_session', { sessionId: sessionIdFromRun })
+  assert.equal(restored.archived, false)
+  const listedAgain = await call('dsh_list_sessions', { limit: 5 })
+  assert.equal(listedAgain.count, 1)
+  assert.equal(listedAgain.sessions[0].archived, false)
+  checks.push('dsh_unarchive_session restores the session to the listing')
 
   const endpoint = JSON.parse(await readFile(endpointFile, 'utf8'))
   assert.equal(endpoint.token, 'integration-token')
