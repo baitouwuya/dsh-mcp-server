@@ -134,6 +134,27 @@ Point the client at the endpoint with the bearer token:
 It forwards JSON-RPC messages verbatim, cancels the upstream request when the client sends
 `notifications/cancelled`, and keeps stdout clean (diagnostics go to stderr).
 
+Because GUI clients launch with a minimal `PATH`, point `command` at an absolute Node binary and rely
+on the bridge's `~/.dsh` discovery (both verified with only `HOME` and `PATH` set):
+
+| Client | Config file | Entry |
+|---|---|---|
+| Claude Code (user scope) | `~/.claude.json` | `mcpServers.dsh` |
+| Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` | `mcpServers.dsh` |
+| ChatGPT desktop / Codex | `~/.codex/config.toml` | `[mcp_servers.dsh]` |
+
+```toml
+# Codex / ChatGPT desktop
+[mcp_servers.dsh]
+type = "stdio"
+command = "/Users/baitouwuya/.local/bin/node"
+args = ["/Users/baitouwuya/dsh-mcp-server/bin/dsh-mcp-stdio.mjs"]
+startup_timeout_sec = 60
+```
+
+Restart the client after editing its config. A cloud MCP client (for example a web connector) cannot
+reach a loopback endpoint at all — that needs a tunnel and a deliberate networking change.
+
 ### 3. DSH as its own MCP client
 
 DSH ships `@deepseek-ai/dsh-mcp-client`; a row like this registers this server's tools inside DSH as
