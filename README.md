@@ -174,6 +174,8 @@ node test/mcp-self-test.mjs            # 11 transport checks, no Harness needed
 node test/plugin-integration-test.mjs  # 10 checks: apply(), endpoint file, tools, transcript filter,
                                        # hot-reload endpoint ownership
 node test/stdio-bridge-test.mjs        # 4 checks, needs a RUNNING Harness (one real delegated turn)
+node test/live-e2e-test.mjs            # 22 checks over HTTP: protocol, resources, all seven tools,
+                                       # error paths, 3 real turns (needs a RUNNING Harness)
 ```
 
 Live checks used during development also covered: a real MCP client exchange against the running
