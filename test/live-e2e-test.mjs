@@ -74,7 +74,7 @@ oh('initialize negotiates 2025-06-18 with tools + resources capabilities')
 
 const listed = (await rpc('tools/list', {})).body.result.tools.map((tool) => tool.name)
 assert.deepEqual([...listed].sort(), [...EXPECTED_TOOLS].sort())
-oh('tools/list exposes exactly the seven documented tools')
+oh('tools/list exposes exactly the nine documented tools')
 
 const resources = (await rpc('resources/list', {})).body.result.resources.map((resource) => resource.uri)
 assert.deepEqual([...resources].sort(), ['dsh://sessions', 'dsh://status'])
