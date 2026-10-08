@@ -1,0 +1,19 @@
+# Verification bundle: DSH's own MCP client against the DSH MCP Server.
+#
+# It exists to prove the published endpoint works with a real MCP client, and
+# to expose the server's tools inside DSH as `mcp__dsh__*`. Disable this row
+# (`disabled: true`) when you do not want a self-loop in every session.
+#
+# The bearer token must equal the token the `dsh-mcp-server` row is configured
+# with in the profile (or the generated token in $DSH_HOME/mcp/dsh-mcp-endpoint.json).
+- insert:
+    - id: mcp-dsh-selfcheck
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: dsh
+        transport: streamable-http
+        url: http://127.0.0.1:19387/mcp
+        headers:
+          Authorization: Bearer <token from the endpoint file>
+        failOnStartupError: false
+        toolCallTimeoutMs: 120000

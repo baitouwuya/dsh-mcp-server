@@ -1,0 +1,5 @@
+# dsh-mcp-server bundle: inserts the DSH MCP Server Host plugin into the profile.
+- insert:
+    - id: dsh-mcp-server
+      name: '@local/dsh-mcp-server'
+      config: {}

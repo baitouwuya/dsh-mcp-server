@@ -1,0 +1,4 @@
+{
+  "title": "DSH MCP 服务器",
+  "description": "把正在运行的 DeepSeek Harness 通过 Model Context Protocol 暴露出去，让其他 harness 可以创建会话、继续对话并读取记录。"
+}

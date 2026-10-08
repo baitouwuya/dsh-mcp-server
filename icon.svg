@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="DSH MCP Server">
+  <rect x="4" y="4" width="56" height="56" rx="14" fill="#1f2937"/>
+  <path d="M18 40V24l7 9 7-9v16" fill="none" stroke="#7dd3fc" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M38 24v6a5 5 0 0 0 10 0v-6M43 35v5" fill="none" stroke="#f9fafb" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="43" cy="17" r="3" fill="#7dd3fc"/>
+</svg>

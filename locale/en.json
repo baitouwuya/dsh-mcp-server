@@ -1,0 +1,4 @@
+{
+  "title": "DSH MCP Server",
+  "description": "Expose the running DeepSeek Harness over the Model Context Protocol, so other agent harnesses can start sessions, continue them, and read transcripts."
+}

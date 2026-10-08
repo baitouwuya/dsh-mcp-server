@@ -1,0 +1,38 @@
+{
+  "name": "@local/dsh-mcp-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Expose DeepSeek Harness sessions, agents, and tools to any other agent harness over the Model Context Protocol.",
+  "license": "MIT",
+  "icon": "./icon.svg",
+  "meta": {
+    "title": "DSH MCP Server",
+    "description": "Serves a Model Context Protocol (MCP) endpoint from the running DeepSeek Harness host, so other agent harnesses can start DSH sessions, continue them, and read their transcripts."
+  },
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "bin": {
+    "dsh-mcp-stdio": "./bin/dsh-mcp-stdio.mjs"
+  },
+  "files": [
+    "index.js",
+    "lib",
+    "bin",
+    "locale",
+    "icon.svg",
+    "README.md",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

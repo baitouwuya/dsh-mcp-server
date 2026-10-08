@@ -1,0 +1,12 @@
+{
+  "name": "@local/dsh-mcp-selfcheck",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Verification bundle: registers DSH's own MCP client against the DSH MCP Server, so DSH can call itself through the published MCP endpoint.",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
