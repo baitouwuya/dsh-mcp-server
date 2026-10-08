@@ -184,7 +184,11 @@ start + cancel, and the stdio bridge.
 
 - **Code changes need a Harness restart.** Re-enabling a bundle reloads its row but reuses the
   already-imported module generation, so edited plugin code only takes effect after restarting DSH.
-  Config changes and bundle add/remove apply immediately.
+  Config changes reach the running instance immediately; changing a bundle's package path may report
+  `restart-required`.
+- **The bearer token is a local secret.** The desktop profile keeps it in
+  `$DSH_HOME/profiles/desktop/cordis.patch.yml`, and `selfcheck/cordis.patch.yml` repeats it. Rotate by
+  updating both places. It authorizes full DSH session control over loopback, so treat it accordingly.
 - **Localhost only.** The endpoint rides the Harness web server, which binds loopback. Exposing it to
   another machine is a deliberate networking change, not a plugin setting.
 - **Approval and user questions.** A turn started over MCP runs with the session's own approval and
