@@ -40,6 +40,34 @@ function makeServices() {
   const events = []
   let pendingPrompt
   let currentSessionId
+  let seq = 0
+  const appliedPermissions = []
+  const resolvedAgents = []
+
+  /** The one live session the fake store hands back to the permission writer. */
+  const liveSession = { id: 'live-session', append() {} }
+
+  /** Permission presets mirroring the deployment's read-only/write/full table. */
+  const permissionOptions = [
+    { value: 'read-only', name: 'Read only', description: 'Read files; no writes.' },
+    { value: 'workspace-write', name: 'Workspace write', description: 'Write inside the workspace; wider retries need approval.' },
+    { value: 'danger-full-access', name: 'Full access', description: 'Full file access without approval prompts.' },
+  ]
+  const permissionPresets = {
+    catalog: () => ({ defaultPreset: 'workspace-write', defaultOptions: permissionOptions, options: permissionOptions }),
+    set(session, name) {
+      if (!permissionOptions.some((option) => option.value === name)) {
+        throw new Error(`permission: unknown preset "${name}" (known: ${permissionOptions.map((option) => option.value).join(', ')})`)
+      }
+      appliedPermissions.push({ session, name })
+      // Mirror the durable event the real service appends, so the transcript
+      // fold can be exercised over the same log the plugin reads.
+      events.push({ type: 'permission/preset', seq: ++seq, time: Date.now(), data: { preset: name } })
+    },
+  }
+
+  /** The live-session store the plugin consults before falling back to resolveAgent(). */
+  const sessions = { get: (id) => (id === currentSessionId ? liveSession : undefined) }
 
   const sessionController = {
     async create(request) {
@@ -47,35 +75,42 @@ function makeServices() {
       return { sessionId: currentSessionId }
     },
     async selectModel() {},
+    /** Cold-session resume path used when the store holds no live entry. */
+    async resolveAgent(id) {
+      resolvedAgents.push(id)
+      return { agent: { session: liveSession } }
+    },
     async prompt(request) {
       currentSessionId = request.sessionId
       pendingPrompt = request.content.map((part) => part.text).join('')
       events.push({
         type: 'user/message',
-        seq: 1,
+        seq: ++seq,
         time: Date.now(),
         data: { source: { kind: 'runtime-context' }, content: [{ type: 'text', text: 'INJECTED CONTEXT' }] },
       })
       events.push({
         type: 'user/message',
-        seq: 2,
+        seq: ++seq,
         time: Date.now(),
         data: { source: { kind: 'user' }, content: [{ type: 'text', text: pendingPrompt }] },
       })
       return { accepted: true }
     },
     follow() {
-      events.push({
+      const assistant = {
         type: 'assistant/message',
-        seq: 3,
+        seq: ++seq,
         time: Date.now(),
         data: { message: { content: [{ type: 'text', text: REPLY }] } },
-      })
-      events.push({ type: 'turn/end', seq: 4, time: Date.now(), data: { reason: { kind: 'completed' } } })
+      }
+      const end = { type: 'turn/end', seq: ++seq, time: Date.now(), data: { reason: { kind: 'completed' } } }
+      const before = events.slice()
+      events.push(assistant, end)
       const frames = [
-        { type: 'snapshot', header: { id: currentSessionId }, cursor: 2, records: events.slice(0, 2).map((event) => ({ type: 'event', event })), hasMore: false },
-        { type: 'event', event: events[2] },
-        { type: 'event', event: events[3] },
+        { type: 'snapshot', header: { id: currentSessionId }, cursor: before.length, records: before.map((event) => ({ type: 'event', event })), hasMore: false },
+        { type: 'event', event: assistant },
+        { type: 'event', event: end },
       ]
       return (async function* stream() {
         for (const frame of frames) yield frame
@@ -130,6 +165,8 @@ function makeServices() {
     services: {
       sessionController,
       sessionQuery,
+      sessions,
+      permissionPresets,
       webServer,
       workspaceRegistry,
       tools: { schemas: () => [{ name: 'read_file', description: 'Read a file' }] },
@@ -139,12 +176,14 @@ function makeServices() {
     getPrompt: () => pendingPrompt,
     setBusy: (value) => { busy = value },
     archivedIds: () => [...archived],
+    appliedPermissions: () => appliedPermissions.map((entry) => entry.name),
+    resolvedAgents: () => [...resolvedAgents],
   }
 }
 
 const dir = await mkdtemp(join(tmpdir(), 'dsh-mcp-test-'))
 const endpointFile = join(dir, 'dsh-mcp-endpoint.json')
-const { services, webServer, getPrompt, setBusy, archivedIds } = makeServices()
+const { services, webServer, getPrompt, setBusy, archivedIds, appliedPermissions, resolvedAgents } = makeServices()
 let sessionIdFromRun
 const disposers = []
 const ctx = makeContext(services, disposers)
@@ -206,8 +245,10 @@ try {
 
   const status = await call('dsh_status', {})
   assert.equal(status.defaultModel.model, 'deepseek-v4.1-flash-anthropic')
-  assert.equal(status.toolNames.length, 9)
-  checks.push('dsh_status reports the default model and tool names')
+  assert.equal(status.toolNames.length, 10)
+  assert.equal(status.defaultPermissionPreset, 'workspace-write')
+  assert.deepEqual(status.permissionPresets.map((option) => option.value), ['read-only', 'workspace-write', 'danger-full-access'])
+  checks.push('dsh_status reports the default model, tool names, and permission presets')
 
   const tools = await call('dsh_list_tools', {})
   assert.equal(tools.tools[0].name, 'read_file')
@@ -248,6 +289,50 @@ try {
   assert.equal(listedAgain.count, 1)
   assert.equal(listedAgain.sessions[0].archived, false)
   checks.push('dsh_unarchive_session restores the session to the listing')
+
+  // --- permission presets -----------------------------------------------------
+  const roster = await rpc({ jsonrpc: '2.0', id: ++id, method: 'tools/list', params: {} })
+  const runPromptSchema = roster.result.tools.find((entry) => entry.name === 'dsh_run_prompt')
+  assert.ok(runPromptSchema?.inputSchema.properties.permissionPreset, 'dsh_run_prompt must accept permissionPreset')
+  const continueSchema = roster.result.tools.find((entry) => entry.name === 'dsh_continue_session')
+  assert.ok(continueSchema?.inputSchema.properties.permissionPreset, 'dsh_continue_session must accept permissionPreset')
+  checks.push('tools/list advertises permissionPreset on both prompt tools')
+
+  const presets = await call('dsh_list_permission_presets', {})
+  assert.equal(presets.defaultPreset, 'workspace-write')
+  assert.deepEqual(presets.presets.map((option) => option.value), ['read-only', 'workspace-write', 'danger-full-access'])
+  checks.push('dsh_list_permission_presets returns the deployment catalog')
+
+  const pinned = await call('dsh_run_prompt', { prompt: PROMPT, cwd: '/tmp', permissionPreset: 'read-only' })
+  assert.equal(pinned.permissionPreset, 'read-only')
+  assert.deepEqual(appliedPermissions(), ['read-only'])
+  const pinnedRead = await call('dsh_read_session', { sessionId: pinned.sessionId, limit: 0 })
+  assert.equal(pinnedRead.permissionPreset, 'read-only')
+  checks.push('dsh_run_prompt applies permissionPreset and the transcript folds it back')
+
+  const repinned = await call('dsh_continue_session', { sessionId: pinned.sessionId, prompt: PROMPT, permissionPreset: 'danger-full-access' })
+  assert.equal(repinned.permissionPreset, 'danger-full-access')
+  assert.deepEqual(appliedPermissions(), ['read-only', 'danger-full-access'])
+  const repinnedRead = await call('dsh_read_session', { sessionId: pinned.sessionId, limit: 0 })
+  assert.equal(repinnedRead.permissionPreset, 'danger-full-access')
+  checks.push('dsh_continue_session re-pins permissionPreset on an existing session')
+
+  const unknownPreset = await rpc({
+    jsonrpc: '2.0',
+    id: ++id,
+    method: 'tools/call',
+    params: { name: 'dsh_run_prompt', arguments: { prompt: PROMPT, cwd: '/tmp', permissionPreset: 'no-such-preset' } },
+  })
+  assert.ok(unknownPreset.result?.isError, 'an unknown permission preset must fail the call')
+  assert.match(unknownPreset.result.content[0].text, /no-such-preset/)
+  assert.match(unknownPreset.result.content[0].text, /read-only/)
+  checks.push('an unknown permission preset fails and lists the available ones')
+
+  const cold = await call('dsh_continue_session', { sessionId: 'session-cold', prompt: PROMPT, permissionPreset: 'workspace-write' })
+  assert.equal(cold.permissionPreset, 'workspace-write')
+  assert.deepEqual(resolvedAgents(), ['session-cold'])
+  assert.deepEqual(appliedPermissions(), ['read-only', 'danger-full-access', 'workspace-write'])
+  checks.push('a session the store does not hold is resumed through resolveAgent before pinning')
 
   const endpoint = JSON.parse(await readFile(endpointFile, 'utf8'))
   assert.equal(endpoint.token, 'integration-token')

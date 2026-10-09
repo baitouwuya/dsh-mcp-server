@@ -4,7 +4,7 @@
  * another harness: protocol handshake, resources, every tool, and the error
  * paths an external client will hit.
  *
- * It performs three real delegated turns (one waited, one continuation, one
+ * It performs four real delegated turns (two waited, one continuation, one
  * detached + cancelled), so it needs a live Harness with the plugin active.
  * Run: node test/live-e2e-test.mjs
  */
@@ -26,6 +26,7 @@ const EXPECTED_TOOLS = [
   'dsh_cancel_session',
   'dsh_archive_session',
   'dsh_unarchive_session',
+  'dsh_list_permission_presets',
   'dsh_list_tools',
   'dsh_status',
 ]
@@ -74,7 +75,7 @@ oh('initialize negotiates 2025-06-18 with tools + resources capabilities')
 
 const listed = (await rpc('tools/list', {})).body.result.tools.map((tool) => tool.name)
 assert.deepEqual([...listed].sort(), [...EXPECTED_TOOLS].sort())
-oh('tools/list exposes exactly the nine documented tools')
+oh('tools/list exposes exactly the ten documented tools')
 
 const resources = (await rpc('resources/list', {})).body.result.resources.map((resource) => resource.uri)
 assert.deepEqual([...resources].sort(), ['dsh://sessions', 'dsh://status'])
@@ -126,15 +127,23 @@ const tools = await call('dsh_list_tools')
 assert.ok(tools.count > 0 && tools.tools[0].name)
 oh('dsh_list_tools lists native Harness tools')
 
+const presets = await call('dsh_list_permission_presets')
+assert.ok(presets.presets.some((option) => option.value === 'workspace-write'))
+assert.ok(presets.presets.some((option) => option.value === 'danger-full-access'))
+assert.equal(typeof presets.defaultPreset, 'string')
+oh('dsh_list_permission_presets lists the deployment presets')
+
 const marker = `E2E-${Date.now().toString().slice(-4)}`
 const run = await call('dsh_run_prompt', {
   prompt: `Reply with exactly this text and nothing else: ${marker}. Do not use any tools.`,
   cwd: '/tmp',
+  permissionPreset: 'read-only',
   timeoutMs: 240_000,
 })
 assert.equal(run.status, 'completed')
 assert.match(run.text, new RegExp(marker))
 assert.match(run.sessionId, /^session-/)
+assert.equal(run.permissionPreset, 'read-only')
 oh('dsh_run_prompt starts a session and returns the assistant final text')
 
 const digits = marker.split('-')[1]
@@ -152,7 +161,20 @@ assert.equal(transcript.sessionId, run.sessionId)
 assert.ok(transcript.messages.some((message) => message.role === 'user'))
 assert.ok(transcript.messages.some((message) => message.role === 'assistant'))
 assert.ok(transcript.messages.some((message) => message.text.includes(marker)))
-oh('dsh_read_session returns ordered user/assistant rows')
+assert.equal(transcript.permissionPreset, 'read-only')
+oh('dsh_read_session returns ordered user/assistant rows and the pinned permission preset')
+
+const repinned = await call('dsh_continue_session', {
+  sessionId: run.sessionId,
+  prompt: 'Reply with exactly this text and nothing else: ACK. Do not use any tools.',
+  permissionPreset: 'danger-full-access',
+  timeoutMs: 240_000,
+})
+assert.equal(repinned.status, 'completed')
+assert.equal(repinned.permissionPreset, 'danger-full-access')
+const repinnedRead = await call('dsh_read_session', { sessionId: run.sessionId, limit: 0 })
+assert.equal(repinnedRead.permissionPreset, 'danger-full-access')
+oh('dsh_continue_session re-pins the permission preset on a live session')
 
 const sessionResource = JSON.parse((await rpc('resources/read', { uri: `dsh://session/${run.sessionId}` })).body.result.contents[0].text)
 assert.equal(sessionResource.sessionId, run.sessionId)
@@ -213,6 +235,14 @@ oh('a missing required argument fails the call')
 const bogusSession = (await rpc('tools/call', { name: 'dsh_read_session', arguments: { sessionId: 'session-does-not-exist' } })).body
 assert.ok(bogusSession.result?.isError || bogusSession.error, 'an unknown session must fail the call')
 oh('reading an unknown session fails cleanly')
+
+const badPreset = (await rpc('tools/call', {
+  name: 'dsh_continue_session',
+  arguments: { sessionId: run.sessionId, prompt: 'never sent', permissionPreset: 'no-such-preset' },
+})).body
+assert.ok(badPreset.result?.isError || badPreset.error, 'an unknown permission preset must fail the call')
+assert.match(JSON.stringify(badPreset), /no-such-preset/)
+oh('an unknown permission preset fails cleanly')
 
 for (const check of checks) process.stdout.write(`ok - ${check}\n`)
 process.stdout.write(`\n${checks.length} live MCP checks passed\n`)

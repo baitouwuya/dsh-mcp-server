@@ -16,19 +16,30 @@ other harness ──MCP (Streamable HTTP or stdio)──> DSH MCP Server ──>
 
 | MCP tool | Purpose |
 |---|---|
-| `dsh_run_prompt` | Start a **new** DSH session and run one prompt; returns the assistant's final text and the new `sessionId`. Supports `cwd`, `agentPreset`, `model` (`provider/model`), `wait: false`, `timeoutMs`. |
-| `dsh_continue_session` | Send a prompt to an **existing** session (resuming it if it is cold). Keeps the session's context and workspace. |
+| `dsh_run_prompt` | Start a **new** DSH session and run one prompt; returns the assistant's final text and the new `sessionId`. Supports `cwd`, `agentPreset`, `permissionPreset`, `model` (`provider/model`), `wait: false`, `timeoutMs`. |
+| `dsh_continue_session` | Send a prompt to an **existing** session (resuming it if it is cold). Keeps the session's context and workspace; `permissionPreset` re-pins the session's sandbox mode and approval policy before the prompt. |
 | `dsh_list_sessions` | Visible sessions with title, cwd, running state, archival state, and last activity. Archived sessions are hidden unless `includeArchived: true`, mirroring the Web UI. |
-| `dsh_read_session` | Ordered `{ role, text, seq }` transcript of one session (user-authored and assistant messages only). Works while the session is archived. |
+| `dsh_read_session` | Ordered `{ role, text, seq }` transcript of one session (user-authored and assistant messages only), plus the last durable `permissionPreset` when the session has one. Works while the session is archived. |
 | `dsh_cancel_session` | Cancel the active turn of a session without dropping its pending inbox. |
 | `dsh_archive_session` | Archive one session durably: hidden from every grouping surface, and it cannot run a model step until restored. A session with running work is refused unless `stopActivity: true` (which archives first, then stops that work). Archiving drops the pin. |
 | `dsh_unarchive_session` | Drop a session from the archive set; it is listed again and returns to its recorded workspace position. |
+| `dsh_list_permission_presets` | The deployment's permission presets (each bundles a sandbox mode with an approval policy) plus the default for new sessions, for the `permissionPreset` argument above. |
 | `dsh_list_tools` | The tools DSH exposes to its own agents, for choosing what a delegated prompt can do. |
-| `dsh_status` | Endpoint, profile, version, session/live-agent counts, default model, active turns. |
+| `dsh_status` | Endpoint, profile, version, session/live-agent counts, default model, active turns, and the default permission preset. |
 
 Archival needs the Host's `workspaceRegistry` service (`@deepseek-ai/dsh-workspace`). Without it the
 two archive tools report that the service is unavailable and listings simply omit the `archived`
 field instead of guessing.
+
+Permission presets need the Host's `permissionPresets` service
+(`@deepseek-ai/dsh-permission-presets`). `permissionPreset` is applied through that service's own
+`set()` — the same write path as the GUI `/permission` command — once the session is live and before
+its prompt is admitted, so the turn's own tool calls already see the chosen sandbox mode and approval
+policy. The outcome echoes the applied preset; `dsh_read_session` folds the session's last durable
+`permission/preset` event back into its payload, and `dsh_status` carries `defaultPermissionPreset`
+plus the catalog. Without the service the permission fields are omitted and
+`dsh_list_permission_presets` reports that the service is unavailable. A session created without a
+`permissionPreset` keeps the deployment default, exactly as a GUI-created session does.
 
 Resources: `dsh://status`, `dsh://sessions`, and the template `dsh://session/{sessionId}`.
 
@@ -198,16 +209,18 @@ Its `cordis.patch.yml` bearer token must match the server's configured token.
 
 ```bash
 node test/mcp-self-test.mjs            # 11 transport checks, no Harness needed
-node test/plugin-integration-test.mjs  # 17 checks: apply(), endpoint file, tools, transcript filter,
-                                       # archival tools, hot-reload endpoint ownership
+node test/plugin-integration-test.mjs  # 23 checks: apply(), endpoint file, tools, transcript filter,
+                                       # archival tools, permission presets, hot-reload endpoint ownership
 node test/stdio-bridge-test.mjs        # 4 checks, needs a RUNNING Harness (one real delegated turn)
-node test/live-e2e-test.mjs            # 27 checks over HTTP: protocol, resources, all nine tools,
-                                       # archive/unarchive, error paths, 3 real turns (needs a Harness)
+node test/live-e2e-test.mjs            # 30 checks over HTTP: protocol, resources, all ten tools,
+                                       # archive/unarchive, permission presets, error paths,
+                                       # 4 real turns (needs a Harness)
 ```
 
 Live checks used during development also covered: a real MCP client exchange against the running
-Harness, an end-to-end `dsh_run_prompt` → `dsh_continue_session` → `dsh_read_session` flow, detached
-start + cancel, and the stdio bridge.
+Harness, an end-to-end `dsh_run_prompt` → `dsh_continue_session` → `dsh_read_session` flow, permission
+presets applied and re-pinned over MCP and folded back out of the transcript, detached start + cancel,
+and the stdio bridge.
 
 ## Notes and limitations
 
@@ -221,7 +234,8 @@ start + cancel, and the stdio bridge.
 - **Localhost only.** The endpoint rides the Harness web server, which binds loopback. Exposing it to
   another machine is a deliberate networking change, not a plugin setting.
 - **Approval and user questions.** A turn started over MCP runs with the session's own approval and
-  sandbox policy; if a delegated turn needs approval, the prompt appears in the Harness GUI like any
-  other session.
+  sandbox policy (`permissionPreset`, or the deployment default); if a delegated turn needs approval,
+  the prompt appears in the Harness GUI like any other session. Switching a session's preset from the
+  GUI (`/permission`) and over MCP write the same durable events, so the last writer wins per session.
 - Sessions started over MCP are ordinary DSH sessions: they appear in the Harness session list and can
   be opened and continued in the GUI.

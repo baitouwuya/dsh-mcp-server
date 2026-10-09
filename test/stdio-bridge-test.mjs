@@ -59,7 +59,7 @@ try {
   send({ jsonrpc: '2.0', method: 'notifications/initialized' })
   send({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} })
   const list = await waitFor(2)
-  assert.equal(list.result.tools.length, 9)
+  assert.equal(list.result.tools.length, 10)
   checks.push('tools/list over stdio')
 
   send({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'dsh_status', arguments: {} } })
