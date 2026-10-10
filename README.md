@@ -18,6 +18,8 @@ other harness ──MCP (Streamable HTTP or stdio)──> DSH MCP Server ──>
 |---|---|
 | `dsh_run_prompt` | Start a **new** DSH session and run one prompt; returns the assistant's final text and the new `sessionId`. Supports `cwd`, `agentPreset`, `permissionPreset`, `model` (`provider/model`), `wait: false`, `timeoutMs`. |
 | `dsh_continue_session` | Send a prompt to an **existing** session (resuming it if it is cold). Keeps the session's context and workspace; `permissionPreset` re-pins the session's sandbox mode and approval policy before the prompt. |
+| `dsh_list_commands` | The slash commands a session's agent can currently run: the global command layer plus whatever that agent's preset composes, so availability differs per agent preset. |
+| `dsh_run_command` | Run one slash command in a session and return its settled `{ kind, text, commandId }`. `line` takes a complete command line (`"/compact"`, `"/permission danger-full-access"`); `command` (+ optional `args`) takes a bare name. The command executes immediately without a model turn. |
 | `dsh_list_sessions` | Visible sessions with title, cwd, running state, archival state, and last activity. Archived sessions are hidden unless `includeArchived: true`, mirroring the Web UI. |
 | `dsh_read_session` | Ordered `{ role, text, seq }` transcript of one session (user-authored and assistant messages only), plus the last durable `permissionPreset` when the session has one. Works while the session is archived. |
 | `dsh_cancel_session` | Cancel the active turn of a session without dropping its pending inbox. |
@@ -40,6 +42,15 @@ policy. The outcome echoes the applied preset; `dsh_read_session` folds the sess
 plus the catalog. Without the service the permission fields are omitted and
 `dsh_list_permission_presets` reports that the service is unavailable. A session created without a
 `permissionPreset` keeps the deployment default, exactly as a GUI-created session does.
+
+Commands need the Host's `commands` service and are addressed by **agent**, not by session: the
+registry merges a global layer with the layers of the preset that agent is mounted under, so
+`dsh_list_commands` must be asked per session and a command such as `/compact` exists only when that
+session's preset composes it (`standard`/`ptc`/`cordis` do; `minimal` does not). Execution goes
+through the same `commands.execute()` the Web composer uses: the handler runs immediately, the
+lifecycle is logged as `command/run` + `command/done`, and **no model turn is started**. `kind` is
+`success` or `error`; a line the Host would not parse as a command, or a name it does not know, is
+rejected with the available commands listed.
 
 Resources: `dsh://status`, `dsh://sessions`, and the template `dsh://session/{sessionId}`.
 
@@ -209,18 +220,18 @@ Its `cordis.patch.yml` bearer token must match the server's configured token.
 
 ```bash
 node test/mcp-self-test.mjs            # 11 transport checks, no Harness needed
-node test/plugin-integration-test.mjs  # 23 checks: apply(), endpoint file, tools, transcript filter,
-                                       # archival tools, permission presets, hot-reload endpoint ownership
+node test/plugin-integration-test.mjs  # 28 checks: apply(), endpoint file, tools, transcript filter,
+                                       # archival tools, permission presets, commands, hot-reload ownership
 node test/stdio-bridge-test.mjs        # 4 checks, needs a RUNNING Harness (one real delegated turn)
-node test/live-e2e-test.mjs            # 30 checks over HTTP: protocol, resources, all ten tools,
-                                       # archive/unarchive, permission presets, error paths,
+node test/live-e2e-test.mjs            # 34 checks over HTTP: protocol, resources, all twelve tools,
+                                       # archive/unarchive, permission presets, commands, error paths,
                                        # 4 real turns (needs a Harness)
 ```
 
 Live checks used during development also covered: a real MCP client exchange against the running
 Harness, an end-to-end `dsh_run_prompt` → `dsh_continue_session` → `dsh_read_session` flow, permission
-presets applied and re-pinned over MCP and folded back out of the transcript, detached start + cancel,
-and the stdio bridge.
+presets applied and re-pinned over MCP and folded back out of the transcript, a command executed
+without adding a model message, detached start + cancel, and the stdio bridge.
 
 ## Notes and limitations
 
@@ -237,5 +248,10 @@ and the stdio bridge.
   sandbox policy (`permissionPreset`, or the deployment default); if a delegated turn needs approval,
   the prompt appears in the Harness GUI like any other session. Switching a session's preset from the
   GUI (`/permission`) and over MCP write the same durable events, so the last writer wins per session.
+- **Commands are immediate and per agent.** `dsh_run_command` runs on the addressed agent's command
+  layer (global + that agent's preset), so a preset-scoped command such as `/compact` may be absent for
+  another session. It is not queued behind a running turn and it can mutate session state
+  (`/permission`), so it carries the same authority as typing the command in the GUI; `dsh_list_commands`
+  first is the way to know what a session accepts.
 - Sessions started over MCP are ordinary DSH sessions: they appear in the Harness session list and can
   be opened and continued in the GUI.

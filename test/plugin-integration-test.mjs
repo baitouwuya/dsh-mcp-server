@@ -69,6 +69,40 @@ function makeServices() {
   /** The live-session store the plugin consults before falling back to resolveAgent(). */
   const sessions = { get: (id) => (id === currentSessionId ? liveSession : undefined) }
 
+  /** Command registry the fake agent sees; `/permission` writes through the presets fake. */
+  const commandRegistry = [
+    { name: 'compact', description: 'Compact older conversation history' },
+    { name: 'permission', description: 'Switch the permission preset (sandbox mode + approval policy)', input: { hint: '<preset>' } },
+  ]
+  const listedCommandAgents = []
+  const executedCommands = []
+  const commands = {
+    list(agent) {
+      listedCommandAgents.push(agent)
+      return commandRegistry
+    },
+    async execute(agent, line, attachments, signal) {
+      executedCommands.push({ agent, line, attachments, aborted: signal?.aborted === true })
+      const match = /^\/([a-z][a-z0-9_-]*)(?=$|[\t\n\r ])/u.exec(line)
+      if (!match) return undefined
+      const name = match[1]
+      if (!commandRegistry.some((entry) => entry.name === name)) return undefined
+      const rawInput = line.slice(match[0].length).trim()
+      if (name === 'permission') {
+        if (!rawInput) {
+          return { commandId: 'cmd-current', result: { kind: 'success', text: 'current preset workspace-write (available: read-only, workspace-write, danger-full-access)' } }
+        }
+        try {
+          permissionPresets.set(liveSession, rawInput)
+        } catch (error) {
+          return { commandId: 'cmd-permission-error', result: { kind: 'error', text: error instanceof Error ? error.message : String(error) } }
+        }
+        return { commandId: 'cmd-permission', result: { kind: 'success', text: `preset ${rawInput}` } }
+      }
+      return { commandId: `cmd-${name}`, result: { kind: 'success', text: 'Compacted 3 history items (~120 tokens).', sourceEventSeq: 99 } }
+    },
+  }
+
   const sessionController = {
     async create(request) {
       currentSessionId = request.sessionId
@@ -167,6 +201,7 @@ function makeServices() {
       sessionQuery,
       sessions,
       permissionPresets,
+      commands,
       webServer,
       workspaceRegistry,
       tools: { schemas: () => [{ name: 'read_file', description: 'Read a file' }] },
@@ -178,12 +213,15 @@ function makeServices() {
     archivedIds: () => [...archived],
     appliedPermissions: () => appliedPermissions.map((entry) => entry.name),
     resolvedAgents: () => [...resolvedAgents],
+    listedCommandAgents: () => [...listedCommandAgents],
+    executedCommands: () => [...executedCommands],
+    currentId: () => currentSessionId,
   }
 }
 
 const dir = await mkdtemp(join(tmpdir(), 'dsh-mcp-test-'))
 const endpointFile = join(dir, 'dsh-mcp-endpoint.json')
-const { services, webServer, getPrompt, setBusy, archivedIds, appliedPermissions, resolvedAgents } = makeServices()
+const { services, webServer, getPrompt, setBusy, archivedIds, appliedPermissions, resolvedAgents, listedCommandAgents, executedCommands, currentId } = makeServices()
 let sessionIdFromRun
 const disposers = []
 const ctx = makeContext(services, disposers)
@@ -245,7 +283,7 @@ try {
 
   const status = await call('dsh_status', {})
   assert.equal(status.defaultModel.model, 'deepseek-v4.1-flash-anthropic')
-  assert.equal(status.toolNames.length, 10)
+  assert.equal(status.toolNames.length, 12)
   assert.equal(status.defaultPermissionPreset, 'workspace-write')
   assert.deepEqual(status.permissionPresets.map((option) => option.value), ['read-only', 'workspace-write', 'danger-full-access'])
   checks.push('dsh_status reports the default model, tool names, and permission presets')
@@ -333,6 +371,49 @@ try {
   assert.deepEqual(resolvedAgents(), ['session-cold'])
   assert.deepEqual(appliedPermissions(), ['read-only', 'danger-full-access', 'workspace-write'])
   checks.push('a session the store does not hold is resumed through resolveAgent before pinning')
+
+  // --- commands ---------------------------------------------------------------
+  const commandList = await call('dsh_list_commands', { sessionId: currentId() })
+  assert.deepEqual(commandList.commands.map((entry) => entry.name), ['compact', 'permission'])
+  assert.equal(commandList.count, 2)
+  assert.equal(listedCommandAgents()[0].session.id, 'live-session')
+  checks.push('dsh_list_commands lists the commands of the session agent')
+
+  const compactRun = await call('dsh_run_command', { sessionId: currentId(), command: 'compact' })
+  assert.equal(compactRun.command, '/compact')
+  assert.equal(compactRun.kind, 'success')
+  assert.match(compactRun.text, /Compacted 3 history items/)
+  assert.equal(compactRun.sourceEventSeq, 99)
+  assert.ok(compactRun.commandId)
+  assert.equal(executedCommands()[0].attachments.length, 0)
+  checks.push('dsh_run_command runs a bare command name as /name')
+
+  const permissionRun = await call('dsh_run_command', { sessionId: currentId(), line: '/permission danger-full-access' })
+  assert.equal(permissionRun.command, '/permission danger-full-access')
+  assert.equal(permissionRun.kind, 'success')
+  assert.deepEqual(appliedPermissions(), ['read-only', 'danger-full-access', 'workspace-write', 'danger-full-access'])
+  checks.push('dsh_run_command executes /permission through the same write path')
+
+  const unknownCommand = await rpc({
+    jsonrpc: '2.0',
+    id: ++id,
+    method: 'tools/call',
+    params: { name: 'dsh_run_command', arguments: { sessionId: currentId(), command: 'no_such_command' } },
+  })
+  assert.ok(unknownCommand.result?.isError, 'an unknown command must fail the call')
+  assert.match(unknownCommand.result.content[0].text, /no_such_command/)
+  assert.match(unknownCommand.result.content[0].text, /compact/)
+  checks.push('an unknown command fails and lists the available ones')
+
+  const malformedCommand = await rpc({
+    jsonrpc: '2.0',
+    id: ++id,
+    method: 'tools/call',
+    params: { name: 'dsh_run_command', arguments: { sessionId: currentId(), line: 'compact' } },
+  })
+  assert.ok(malformedCommand.result?.isError, 'a line without a leading slash must fail the call')
+  assert.match(malformedCommand.result.content[0].text, /slash-command line/)
+  checks.push('a line without a leading slash is rejected before execution')
 
   const endpoint = JSON.parse(await readFile(endpointFile, 'utf8'))
   assert.equal(endpoint.token, 'integration-token')

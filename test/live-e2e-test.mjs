@@ -21,6 +21,8 @@ assert.ok(url && token, `endpoint file ${endpointFile} must carry url and token`
 const EXPECTED_TOOLS = [
   'dsh_run_prompt',
   'dsh_continue_session',
+  'dsh_list_commands',
+  'dsh_run_command',
   'dsh_list_sessions',
   'dsh_read_session',
   'dsh_cancel_session',
@@ -75,7 +77,7 @@ oh('initialize negotiates 2025-06-18 with tools + resources capabilities')
 
 const listed = (await rpc('tools/list', {})).body.result.tools.map((tool) => tool.name)
 assert.deepEqual([...listed].sort(), [...EXPECTED_TOOLS].sort())
-oh('tools/list exposes exactly the ten documented tools')
+oh('tools/list exposes exactly the twelve documented tools')
 
 const resources = (await rpc('resources/list', {})).body.result.resources.map((resource) => resource.uri)
 assert.deepEqual([...resources].sort(), ['dsh://sessions', 'dsh://status'])
@@ -175,6 +177,36 @@ assert.equal(repinned.permissionPreset, 'danger-full-access')
 const repinnedRead = await call('dsh_read_session', { sessionId: run.sessionId, limit: 0 })
 assert.equal(repinnedRead.permissionPreset, 'danger-full-access')
 oh('dsh_continue_session re-pins the permission preset on a live session')
+
+// --- commands ---------------------------------------------------------------
+const messagesBeforeCommand = (await call('dsh_read_session', { sessionId: run.sessionId, limit: 0 })).totalMessages
+const commandList = await call('dsh_list_commands', { sessionId: run.sessionId })
+const commandNames = commandList.commands.map((entry) => entry.name)
+assert.equal(commandList.count, commandList.commands.length)
+assert.ok(commandNames.includes('permission'), `expected /permission among ${commandNames.join(', ')}`)
+oh('dsh_list_commands lists the effective commands of a session')
+
+const permissionQuery = await call('dsh_run_command', { sessionId: run.sessionId, command: 'permission' })
+assert.equal(permissionQuery.command, '/permission')
+assert.equal(permissionQuery.kind, 'success')
+assert.match(permissionQuery.text, /preset/)
+assert.ok(typeof permissionQuery.commandId === 'string' && permissionQuery.commandId.length > 0)
+const messagesAfterCommand = (await call('dsh_read_session', { sessionId: run.sessionId, limit: 0 })).totalMessages
+assert.equal(messagesAfterCommand, messagesBeforeCommand, 'a command must not add model messages')
+oh('dsh_run_command runs /permission without a model turn')
+
+const compactAttempt = (await rpc('tools/call', { name: 'dsh_run_command', arguments: { sessionId: run.sessionId, line: '/compact' } })).body
+if (compactAttempt.result?.isError) {
+  assert.match(compactAttempt.result.content[0].text, /is not a command/)
+} else {
+  assert.equal(compactAttempt.result.structuredContent.kind, 'success')
+}
+oh('dsh_run_command runs /compact, or reports it is not composed for this preset')
+
+const unknownCommand = (await rpc('tools/call', { name: 'dsh_run_command', arguments: { sessionId: run.sessionId, command: 'no_such_command' } })).body
+assert.ok(unknownCommand.result?.isError, 'an unknown command must fail the call')
+assert.match(JSON.stringify(unknownCommand), /no_such_command/)
+oh('an unknown command fails cleanly')
 
 const sessionResource = JSON.parse((await rpc('resources/read', { uri: `dsh://session/${run.sessionId}` })).body.result.contents[0].text)
 assert.equal(sessionResource.sessionId, run.sessionId)
