@@ -4,8 +4,9 @@
 # to expose the server's tools inside DSH as `mcp__dsh__*`. Disable this row
 # (`disabled: true`) when you do not want a self-loop in every session.
 #
-# The bearer token must equal the token the `dsh-mcp-server` row is configured
-# with in the profile (or the generated token in $DSH_HOME/mcp/dsh-mcp-endpoint.json).
+# The bearer token is a local secret and is never committed. Set DSH_MCP_TOKEN
+# in the Harness environment, or patch this row from your own private profile
+# with the token from $DSH_HOME/mcp/dsh-mcp-endpoint.json.
 - insert:
     - id: mcp-dsh-selfcheck
       name: '@deepseek-ai/dsh-mcp-client'
@@ -14,6 +15,6 @@
         transport: streamable-http
         url: http://127.0.0.1:19387/mcp
         headers:
-          Authorization: Bearer <token from the endpoint file>
+          Authorization: !!js '`Bearer ${process.env.DSH_MCP_TOKEN}`'
         failOnStartupError: false
         toolCallTimeoutMs: 120000

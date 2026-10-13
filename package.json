@@ -1,11 +1,28 @@
 {
   "name": "@local/dsh-mcp-server",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "description": "Expose DeepSeek Harness sessions, agents, and tools to any other agent harness over the Model Context Protocol.",
   "license": "MIT",
   "icon": "./icon.svg",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "agent"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/baitouwuya/dsh-mcp-server.git"
+  },
+  "homepage": "https://github.com/baitouwuya/dsh-mcp-server#readme",
+  "bugs": {
+    "url": "https://github.com/baitouwuya/dsh-mcp-server/issues"
+  },
+  "author": "baitouwuya",
   "meta": {
     "title": "DSH MCP Server",
     "description": "Serves a Model Context Protocol (MCP) endpoint from the running DeepSeek Harness host, so other agent harnesses can start DSH sessions, continue them, and read their transcripts."
@@ -17,6 +34,9 @@
   },
   "bin": {
     "dsh-mcp-stdio": "./bin/dsh-mcp-stdio.mjs"
+  },
+  "scripts": {
+    "test": "node test/mcp-self-test.mjs && node test/plugin-integration-test.mjs"
   },
   "files": [
     "index.js",

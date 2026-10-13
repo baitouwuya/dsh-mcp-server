@@ -1,5 +1,7 @@
 # DSH MCP Server
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 A DeepSeek Harness (DSH) plugin that publishes a **Model Context Protocol (MCP)** server from the
 running Harness host, so other agent harnesses — Claude Code, Cursor, Codex, another DSH, any MCP
 client — can call DSH: start sessions, drive turns, read transcripts, and cancel work.
@@ -147,7 +149,7 @@ Point the client at the endpoint with the bearer token:
   "mcpServers": {
     "dsh": {
       "command": "node",
-      "args": ["/Users/baitouwuya/dsh-mcp-server/bin/dsh-mcp-stdio.mjs"]
+      "args": ["<path-to-dsh-mcp-server>/bin/dsh-mcp-stdio.mjs"]
     }
   }
 }
@@ -169,8 +171,8 @@ on the bridge's `~/.dsh` discovery (both verified with only `HOME` and `PATH` se
 # Codex / ChatGPT desktop
 [mcp_servers.dsh]
 type = "stdio"
-command = "/Users/baitouwuya/.local/bin/node"
-args = ["/Users/baitouwuya/dsh-mcp-server/bin/dsh-mcp-stdio.mjs"]
+command = "/absolute/path/to/node"
+args = ["<path-to-dsh-mcp-server>/bin/dsh-mcp-stdio.mjs"]
 startup_timeout_sec = 60
 ```
 
@@ -197,8 +199,9 @@ DSH ships `@deepseek-ai/dsh-mcp-client`; a row like this registers this server's
 ## Install into a profile
 
 ```bash
-# from the Harness UI / plugin_manager
-plugin_manager install_bundle --target /Users/baitouwuya/dsh-mcp-server
+git clone https://github.com/baitouwuya/dsh-mcp-server.git
+# then, from the Harness UI / plugin_manager:
+plugin_manager install_bundle --target /path/to/dsh-mcp-server
 ```
 
 or, equivalently, `action: install_bundle` with the absolute package directory as `target`.
@@ -211,10 +214,12 @@ inside DSH as `mcp__dsh__*`. It is pure verification — disable or skip it if y
 self-loop in every session:
 
 ```bash
-plugin_manager install_bundle --target /Users/baitouwuya/dsh-mcp-server/selfcheck
+plugin_manager install_bundle --target /path/to/dsh-mcp-server/selfcheck
 ```
 
-Its `cordis.patch.yml` bearer token must match the server's configured token.
+The committed `cordis.patch.yml` carries **no literal token** (this is a public repository): set
+`DSH_MCP_TOKEN` in the Harness environment, or patch the `mcp-dsh-selfcheck` row from your own
+private profile, with the token the server is configured with.
 
 ## Verification
 
@@ -255,3 +260,7 @@ without adding a model message, detached start + cancel, and the stdio bridge.
   first is the way to know what a session accepts.
 - Sessions started over MCP are ordinary DSH sessions: they appear in the Harness session list and can
   be opened and continued in the GUI.
+
+## License
+
+[MIT](LICENSE)
