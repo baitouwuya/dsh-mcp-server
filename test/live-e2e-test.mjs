@@ -25,6 +25,7 @@ const EXPECTED_TOOLS = [
   'dsh_run_command',
   'dsh_list_sessions',
   'dsh_read_session',
+  'dsh_wait_session',
   'dsh_cancel_session',
   'dsh_archive_session',
   'dsh_unarchive_session',
@@ -166,6 +167,12 @@ assert.ok(transcript.messages.some((message) => message.text.includes(marker)))
 assert.equal(transcript.permissionPreset, 'read-only')
 oh('dsh_read_session returns ordered user/assistant rows and the pinned permission preset')
 
+const idleWait = await call('dsh_wait_session', { sessionId: run.sessionId, limit: 3 })
+assert.equal(idleWait.status, 'idle')
+assert.equal(idleWait.running, false)
+assert.equal(idleWait.messages.at(-1).role, 'assistant')
+oh('dsh_wait_session returns idle plus a transcript tail once the turn is over')
+
 const repinned = await call('dsh_continue_session', {
   sessionId: run.sessionId,
   prompt: 'Reply with exactly this text and nothing else: ACK. Do not use any tools.',
@@ -249,6 +256,9 @@ const detached = await call('dsh_run_prompt', {
 })
 assert.equal(detached.status, 'started')
 await sleep(4000)
+const detachedWait = await call('dsh_wait_session', { sessionId: detached.sessionId, timeoutMs: 5000, limit: 2 })
+assert.ok(['completed', 'timedOut'].includes(detachedWait.status), `unexpected wait status ${detachedWait.status}`)
+oh('dsh_wait_session follows a detached turn without cancelling it')
 const cancelled = await call('dsh_cancel_session', { sessionId: detached.sessionId })
 assert.equal(cancelled.status, 'cancel-requested')
 const detachedTranscript = await call('dsh_read_session', { sessionId: detached.sessionId, limit: 0 })

@@ -22,7 +22,7 @@ import { createMcpHttpHandler } from './lib/http-route.js'
 import { McpGateway, SERVER_NAME } from './lib/protocol.js'
 
 /** Keep in sync with package.json; reported through `initialize`. */
-const VERSION = '0.1.1'
+const VERSION = '0.2.0'
 
 /** Cordis: wait for the Web carrier before registering the route. */
 export const inject = ['webServer']

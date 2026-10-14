@@ -4,7 +4,7 @@
 
 A DeepSeek Harness (DSH) plugin that publishes a **Model Context Protocol (MCP)** server from the
 running Harness host, so other agent harnesses — Claude Code, Cursor, Codex, another DSH, any MCP
-client — can call DSH: start sessions, drive turns, read transcripts, and cancel work.
+client — can call DSH: start sessions, drive turns, wait for them, read transcripts, and cancel work.
 
 The plugin is a Host-only bundle with **zero dependencies** (no DSH import, no third-party module),
 so it installs into a profile and survives Harness upgrades that keep the service contracts.
@@ -23,7 +23,8 @@ other harness ──MCP (Streamable HTTP or stdio)──> DSH MCP Server ──>
 | `dsh_list_commands` | The slash commands a session's agent can currently run: the global command layer plus whatever that agent's preset composes, so availability differs per agent preset. |
 | `dsh_run_command` | Run one slash command in a session and return its settled `{ kind, text, commandId }`. `line` takes a complete command line (`"/compact"`, `"/permission danger-full-access"`); `command` (+ optional `args`) takes a bare name. The command executes immediately without a model turn. |
 | `dsh_list_sessions` | Visible sessions with title, cwd, running state, archival state, and last activity. Archived sessions are hidden unless `includeArchived: true`, mirroring the Web UI. |
-| `dsh_read_session` | Ordered `{ role, text, seq }` transcript of one session (user-authored and assistant messages only), plus the last durable `permissionPreset` when the session has one. Works while the session is archived. |
+| `dsh_read_session` | Ordered `{ role, text, seq }` transcript of one session (user-authored and assistant messages only), plus the last durable `permissionPreset` when the session has one. Works while the session is archived and needs no running turn. |
+| `dsh_wait_session` | Block until the turn a session is already running ends, then return the assistant text it produced — for `wait: false` starts, GUI-driven sessions, or another caller's work. Never prompts, steers, or cancels: reaching `timeoutMs` returns `status: "timedOut"` with the turn still running, so call it again; `status: "idle"` returns immediately when nothing is running. |
 | `dsh_cancel_session` | Cancel the active turn of a session without dropping its pending inbox. |
 | `dsh_archive_session` | Archive one session durably: hidden from every grouping surface, and it cannot run a model step until restored. A session with running work is refused unless `stopActivity: true` (which archives first, then stops that work). Archiving drops the pin. |
 | `dsh_unarchive_session` | Drop a session from the archive set; it is listed again and returns to its recorded workspace position. |
@@ -55,6 +56,21 @@ lifecycle is logged as `command/run` + `command/done`, and **no model turn is st
 rejected with the available commands listed.
 
 Resources: `dsh://status`, `dsh://sessions`, and the template `dsh://session/{sessionId}`.
+
+### Waiting for a turn
+
+`dsh_run_prompt` and `dsh_continue_session` wait for their own turn by default. When a call must not
+block for the whole turn, start it with `wait: false` and follow it with `dsh_wait_session`:
+
+| Result | Meaning |
+|---|---|
+| `status: "completed"` / `"error"` | The turn ended; `text` is what it produced and `turnEndReason` is the Host's reason. |
+| `status: "timedOut"` | `timeoutMs` was reached and the turn is **still running** — call `dsh_wait_session` again. |
+| `status: "idle"` | No turn was running, so the call returned immediately. |
+
+No wait path cancels or steers the session: a reached ceiling and a disconnected caller both only stop
+waiting. A client with its own call timeout can therefore set `timeoutMs` below it and re-wait instead
+of polling `dsh_read_session` in a loop. Only `dsh_cancel_session` stops a turn.
 
 ## Endpoint and authentication
 
@@ -104,8 +120,8 @@ The bundle row in `cordis.patch.yml` accepts (all optional):
 | `allowConnectionAuth` | `true` | Also accept requests admitted by `ctx.connection`. |
 | `defaultCwd` | Harness default | Working directory for sessions started without `cwd`. |
 | `defaultModel` | Harness default model | `{ provider, model, reasoningEffort? }` for **newly started** sessions without an explicit `model`. A continued session keeps the model it already runs. |
-| `turnTimeoutMs` | `1800000` | Default wait ceiling for a tool call that waits for a turn. |
-| `maxConcurrentTurns` | `8` | Concurrent waited turns before new calls queue. |
+| `turnTimeoutMs` | `1800000` | Default wait ceiling for a tool call that waits for a turn. Reaching it stops the wait, never the turn. |
+| `maxConcurrentTurns` | `8` | Concurrent waited turns before new calls queue. `dsh_wait_session` starts no turn and takes no slot. |
 | `maxBodyBytes` | `8388608` | Request body ceiling. |
 | `instructions` | built-in text | Replaces the instructions handed to the calling model. |
 
@@ -225,10 +241,11 @@ private profile, with the token the server is configured with.
 
 ```bash
 node test/mcp-self-test.mjs            # 11 transport checks, no Harness needed
-node test/plugin-integration-test.mjs  # 28 checks: apply(), endpoint file, tools, transcript filter,
-                                       # archival tools, permission presets, commands, hot-reload ownership
+node test/plugin-integration-test.mjs  # 36 checks: apply(), endpoint file, tools, transcript filter,
+                                       # waiting, archival tools, permission presets, commands,
+                                       # model pinning, hot-reload ownership
 node test/stdio-bridge-test.mjs        # 4 checks, needs a RUNNING Harness (one real delegated turn)
-node test/live-e2e-test.mjs            # 34 checks over HTTP: protocol, resources, all twelve tools,
+node test/live-e2e-test.mjs            # 36 checks over HTTP: protocol, resources, all thirteen tools,
                                        # archive/unarchive, permission presets, commands, error paths,
                                        # 4 real turns (needs a Harness)
 ```
@@ -236,7 +253,8 @@ node test/live-e2e-test.mjs            # 34 checks over HTTP: protocol, resource
 Live checks used during development also covered: a real MCP client exchange against the running
 Harness, an end-to-end `dsh_run_prompt` → `dsh_continue_session` → `dsh_read_session` flow, permission
 presets applied and re-pinned over MCP and folded back out of the transcript, a command executed
-without adding a model message, detached start + cancel, and the stdio bridge.
+without adding a model message, waiting on a detached turn without cancelling it, detached start
++ cancel, and the stdio bridge.
 
 ## Notes and limitations
 

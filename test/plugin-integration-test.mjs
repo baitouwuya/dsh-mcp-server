@@ -44,6 +44,9 @@ function makeServices() {
   const appliedPermissions = []
   const resolvedAgents = []
   const modelSelections = []
+  const cancelledSessions = []
+  const runningSessions = new Set()
+  let hang = false
 
   /** The one live session the fake store hands back to the permission writer. */
   const liveSession = { id: 'live-session', append() {} }
@@ -134,7 +137,19 @@ function makeServices() {
       })
       return { accepted: true }
     },
-    follow() {
+    follow(_request, signal) {
+      if (hang) {
+        // A turn that never ends on its own: only the caller's ceiling stops the wait.
+        const snapshot = { type: 'snapshot', header: { id: currentSessionId }, cursor: 0, records: [], hasMore: false }
+        return (async function* stream() {
+          yield snapshot
+          await new Promise((_resolve, reject) => {
+            const abort = () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))
+            if (signal?.aborted) return abort()
+            signal?.addEventListener('abort', abort, { once: true })
+          })
+        })()
+      }
       const assistant = {
         type: 'assistant/message',
         seq: ++seq,
@@ -144,6 +159,7 @@ function makeServices() {
       const end = { type: 'turn/end', seq: ++seq, time: Date.now(), data: { reason: { kind: 'completed' } } }
       const before = events.slice()
       events.push(assistant, end)
+      runningSessions.delete(currentSessionId)
       const frames = [
         { type: 'snapshot', header: { id: currentSessionId }, cursor: before.length, records: before.map((event) => ({ type: 'event', event })), hasMore: false },
         { type: 'event', event: assistant },
@@ -153,11 +169,21 @@ function makeServices() {
         for (const frame of frames) yield frame
       })()
     },
-    cancel() {
+    cancel(request) {
+      cancelledSessions.push(request?.sessionId)
       return { accepted: true }
     },
     async list() {
-      return { items: [{ sessionId: currentSessionId, updatedAt: Date.now(), running: false, blank: false, agentAvailable: true, cwd: '/tmp' }] }
+      return {
+        items: [{
+          sessionId: currentSessionId,
+          updatedAt: Date.now(),
+          running: runningSessions.has(currentSessionId),
+          blank: false,
+          agentAvailable: true,
+          cwd: '/tmp',
+        }],
+      }
     },
   }
 
@@ -216,6 +242,12 @@ function makeServices() {
     archivedIds: () => [...archived],
     appliedPermissions: () => appliedPermissions.map((entry) => entry.name),
     modelSelections: () => [...modelSelections],
+    cancelledSessions: () => [...cancelledSessions],
+    setRunning: (value) => {
+      if (value) runningSessions.add(currentSessionId)
+      else runningSessions.delete(currentSessionId)
+    },
+    setHang: (value) => { hang = value },
     resolvedAgents: () => [...resolvedAgents],
     listedCommandAgents: () => [...listedCommandAgents],
     executedCommands: () => [...executedCommands],
@@ -225,7 +257,7 @@ function makeServices() {
 
 const dir = await mkdtemp(join(tmpdir(), 'dsh-mcp-test-'))
 const endpointFile = join(dir, 'dsh-mcp-endpoint.json')
-const { services, webServer, getPrompt, setBusy, archivedIds, appliedPermissions, modelSelections, resolvedAgents, listedCommandAgents, executedCommands, currentId } = makeServices()
+const { services, webServer, getPrompt, setBusy, archivedIds, appliedPermissions, modelSelections, cancelledSessions, setRunning, setHang, resolvedAgents, listedCommandAgents, executedCommands, currentId } = makeServices()
 let sessionIdFromRun
 const disposers = []
 const ctx = makeContext(services, disposers)
@@ -285,9 +317,43 @@ try {
   assert.equal(sessions.sessions[0].running, false)
   checks.push('dsh_list_sessions joins the session title')
 
+  // --- waiting for a turn -----------------------------------------------------
+  const idleWait = await call('dsh_wait_session', { sessionId: sessionIdFromRun })
+  assert.equal(idleWait.status, 'idle')
+  assert.equal(idleWait.running, false)
+  assert.equal(idleWait.text, '')
+  checks.push('dsh_wait_session returns immediately when no turn is running')
+
+  setRunning(true)
+  const waited = await call('dsh_wait_session', { sessionId: sessionIdFromRun, limit: 5 })
+  assert.equal(waited.status, 'completed')
+  assert.equal(waited.running, false)
+  assert.match(waited.text, /hello from dsh/)
+  assert.equal(waited.messages.at(-1).text, REPLY)
+  assert.deepEqual(cancelledSessions(), [])
+  checks.push('dsh_wait_session follows a running turn to its end and returns its text')
+
+  setRunning(true)
+  setHang(true)
+  const ceiling = await call('dsh_wait_session', { sessionId: sessionIdFromRun, timeoutMs: 1000 })
+  assert.equal(ceiling.status, 'timedOut')
+  assert.equal(ceiling.running, true)
+  assert.match(ceiling.note, /Call dsh_wait_session again/)
+  assert.deepEqual(cancelledSessions(), [])
+  checks.push('a waiter that hits its ceiling reports timedOut and cancels nothing')
+
+  const promptCeiling = await call('dsh_continue_session', { sessionId: sessionIdFromRun, prompt: PROMPT, timeoutMs: 1000 })
+  assert.equal(promptCeiling.status, 'timeout')
+  assert.match(promptCeiling.note, /still running/)
+  assert.deepEqual(cancelledSessions(), [])
+  checks.push('a waited prompt that hits its ceiling leaves the turn running too')
+
+  setHang(false)
+  setRunning(false)
+
   const status = await call('dsh_status', {})
   assert.equal(status.defaultModel.model, 'deepseek-v4.1-flash-anthropic')
-  assert.equal(status.toolNames.length, 12)
+  assert.equal(status.toolNames.length, 13)
   assert.equal(status.defaultPermissionPreset, 'workspace-write')
   assert.deepEqual(status.permissionPresets.map((option) => option.value), ['read-only', 'workspace-write', 'danger-full-access'])
   checks.push('dsh_status reports the default model, tool names, and permission presets')
