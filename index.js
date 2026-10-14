@@ -22,7 +22,7 @@ import { createMcpHttpHandler } from './lib/http-route.js'
 import { McpGateway, SERVER_NAME } from './lib/protocol.js'
 
 /** Keep in sync with package.json; reported through `initialize`. */
-const VERSION = '0.1.0'
+const VERSION = '0.1.1'
 
 /** Cordis: wait for the Web carrier before registering the route. */
 export const inject = ['webServer']
@@ -110,7 +110,7 @@ export function apply(ctx, config = {}) {
   })()
   const endpointUrl = `${baseUrl}${path}`
 
-  /** Default model selection applied to MCP-started sessions without an explicit override. */
+  /** Default model for newly started sessions; a continued session keeps its own model. */
   const defaultModel = (() => {
     if (config.defaultModel && typeof config.defaultModel === 'object') {
       const { provider, model, reasoningEffort } = config.defaultModel

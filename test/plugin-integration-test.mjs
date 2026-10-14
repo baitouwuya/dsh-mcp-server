@@ -43,6 +43,7 @@ function makeServices() {
   let seq = 0
   const appliedPermissions = []
   const resolvedAgents = []
+  const modelSelections = []
 
   /** The one live session the fake store hands back to the permission writer. */
   const liveSession = { id: 'live-session', append() {} }
@@ -108,7 +109,9 @@ function makeServices() {
       currentSessionId = request.sessionId
       return { sessionId: currentSessionId }
     },
-    async selectModel() {},
+    async selectModel(request) {
+      modelSelections.push(request)
+    },
     /** Cold-session resume path used when the store holds no live entry. */
     async resolveAgent(id) {
       resolvedAgents.push(id)
@@ -212,6 +215,7 @@ function makeServices() {
     setBusy: (value) => { busy = value },
     archivedIds: () => [...archived],
     appliedPermissions: () => appliedPermissions.map((entry) => entry.name),
+    modelSelections: () => [...modelSelections],
     resolvedAgents: () => [...resolvedAgents],
     listedCommandAgents: () => [...listedCommandAgents],
     executedCommands: () => [...executedCommands],
@@ -221,7 +225,7 @@ function makeServices() {
 
 const dir = await mkdtemp(join(tmpdir(), 'dsh-mcp-test-'))
 const endpointFile = join(dir, 'dsh-mcp-endpoint.json')
-const { services, webServer, getPrompt, setBusy, archivedIds, appliedPermissions, resolvedAgents, listedCommandAgents, executedCommands, currentId } = makeServices()
+const { services, webServer, getPrompt, setBusy, archivedIds, appliedPermissions, modelSelections, resolvedAgents, listedCommandAgents, executedCommands, currentId } = makeServices()
 let sessionIdFromRun
 const disposers = []
 const ctx = makeContext(services, disposers)
@@ -348,12 +352,30 @@ try {
   assert.equal(pinnedRead.permissionPreset, 'read-only')
   checks.push('dsh_run_prompt applies permissionPreset and the transcript folds it back')
 
+  const createdModels = modelSelections().map((entry) => `${entry.provider}/${entry.model}`)
+  assert.deepEqual(createdModels, [
+    'deepseek-official/deepseek-v4.1-flash-anthropic',
+    'deepseek-official/deepseek-v4.1-flash-anthropic',
+  ])
+  checks.push('dsh_run_prompt pins the default model on each new session')
+
   const repinned = await call('dsh_continue_session', { sessionId: pinned.sessionId, prompt: PROMPT, permissionPreset: 'danger-full-access' })
   assert.equal(repinned.permissionPreset, 'danger-full-access')
   assert.deepEqual(appliedPermissions(), ['read-only', 'danger-full-access'])
   const repinnedRead = await call('dsh_read_session', { sessionId: pinned.sessionId, limit: 0 })
   assert.equal(repinnedRead.permissionPreset, 'danger-full-access')
   checks.push('dsh_continue_session re-pins permissionPreset on an existing session')
+
+  assert.equal(modelSelections().length, 2, 'continuing without "model" must not re-pin the session model')
+  checks.push('dsh_continue_session without "model" leaves the session model alone')
+
+  const switched = await call('dsh_continue_session', { sessionId: pinned.sessionId, prompt: PROMPT, model: 'anthropic/claude-opus-5-5' })
+  assert.equal(switched.status, 'completed')
+  assert.deepEqual(
+    { provider: modelSelections().at(-1).provider, model: modelSelections().at(-1).model },
+    { provider: 'anthropic', model: 'claude-opus-5-5' },
+  )
+  checks.push('dsh_continue_session applies an explicit "model" override')
 
   const unknownPreset = await rpc({
     jsonrpc: '2.0',
@@ -371,6 +393,9 @@ try {
   assert.deepEqual(resolvedAgents(), ['session-cold'])
   assert.deepEqual(appliedPermissions(), ['read-only', 'danger-full-access', 'workspace-write'])
   checks.push('a session the store does not hold is resumed through resolveAgent before pinning')
+
+  assert.equal(modelSelections().length, 3, 'a resumed session without "model" must not re-pin the session model')
+  checks.push('resuming a session without "model" leaves its model alone')
 
   // --- commands ---------------------------------------------------------------
   const commandList = await call('dsh_list_commands', { sessionId: currentId() })

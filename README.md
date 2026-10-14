@@ -19,7 +19,7 @@ other harness ──MCP (Streamable HTTP or stdio)──> DSH MCP Server ──>
 | MCP tool | Purpose |
 |---|---|
 | `dsh_run_prompt` | Start a **new** DSH session and run one prompt; returns the assistant's final text and the new `sessionId`. Supports `cwd`, `agentPreset`, `permissionPreset`, `model` (`provider/model`), `wait: false`, `timeoutMs`. |
-| `dsh_continue_session` | Send a prompt to an **existing** session (resuming it if it is cold). Keeps the session's context and workspace; `permissionPreset` re-pins the session's sandbox mode and approval policy before the prompt. |
+| `dsh_continue_session` | Send a prompt to an **existing** session (resuming it if it is cold). Keeps the session's context and workspace; `permissionPreset` re-pins the session's sandbox mode and approval policy before the prompt, and `model` (`provider/model`) overrides the session's model. Without `model` the session keeps the model it already runs. |
 | `dsh_list_commands` | The slash commands a session's agent can currently run: the global command layer plus whatever that agent's preset composes, so availability differs per agent preset. |
 | `dsh_run_command` | Run one slash command in a session and return its settled `{ kind, text, commandId }`. `line` takes a complete command line (`"/compact"`, `"/permission danger-full-access"`); `command` (+ optional `args`) takes a bare name. The command executes immediately without a model turn. |
 | `dsh_list_sessions` | Visible sessions with title, cwd, running state, archival state, and last activity. Archived sessions are hidden unless `includeArchived: true`, mirroring the Web UI. |
@@ -103,7 +103,7 @@ The bundle row in `cordis.patch.yml` accepts (all optional):
 | `writeEndpointFile` | `true` | Publish the endpoint file at all. |
 | `allowConnectionAuth` | `true` | Also accept requests admitted by `ctx.connection`. |
 | `defaultCwd` | Harness default | Working directory for sessions started without `cwd`. |
-| `defaultModel` | Harness default model | `{ provider, model, reasoningEffort? }` for sessions without an explicit override. |
+| `defaultModel` | Harness default model | `{ provider, model, reasoningEffort? }` for **newly started** sessions without an explicit `model`. A continued session keeps the model it already runs. |
 | `turnTimeoutMs` | `1800000` | Default wait ceiling for a tool call that waits for a turn. |
 | `maxConcurrentTurns` | `8` | Concurrent waited turns before new calls queue. |
 | `maxBodyBytes` | `8388608` | Request body ceiling. |
