@@ -511,6 +511,24 @@ try {
   const codex = { headers: { 'x-dsh-mcp-client': 'codex' } }
   const claude = { headers: { 'x-dsh-mcp-client': 'claude-code' } }
 
+  // A labelled caller must never inherit the version of whatever `clientInfo` shares
+  // its transport fingerprint — the first rung is authoritative, version included.
+  await rpc(
+    {
+      jsonrpc: '2.0',
+      id: ++id,
+      method: 'initialize',
+      params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'stdio-test', version: '1' } },
+    },
+    { headers: { 'x-dsh-mcp-client': 'stdio-bridge' } },
+  )
+  const bridged = await call('dsh_whoami', {}, { headers: { 'x-dsh-mcp-client': 'stdio-bridge' } })
+  assert.equal(bridged.client.name, 'stdio-bridge')
+  assert.equal(bridged.client.source, 'header')
+  assert.equal(bridged.client.version, undefined, 'an explicit label must not borrow a cached clientInfo version')
+  checks.push('an explicit label never inherits another client version')
+
+
   // Node's fetch sends a User-Agent, so an unlabelled caller lands on that rung of
   // the ladder rather than the bare peer fallback.
   const anonymous = await call('dsh_whoami', {})
@@ -531,6 +549,13 @@ try {
   const codexWho = await call('dsh_whoami', {}, codex)
   assert.equal(codexWho.ownedSessionCount, 0)
   checks.push('a caller owns nothing before it creates a session')
+
+  const versionedLabel = await call('dsh_whoami', {}, { headers: { 'x-dsh-mcp-client': 'claude-code@2.1.295' } })
+  assert.equal(versionedLabel.client.id, 'claude-code')
+  assert.equal(versionedLabel.client.name, 'claude-code')
+  assert.equal(versionedLabel.client.version, '2.1.295')
+  checks.push('a header label may state its version as name@version')
+
 
   const created = await call('dsh_run_prompt', { prompt: PROMPT, cwd: '/tmp' }, codex)
   assert.equal(created.owner.id, 'codex')

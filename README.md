@@ -86,12 +86,14 @@ against that agent, so a shared endpoint can answer "which sessions did *this* a
 
 | Rung | Signal | Example |
 |---|---|---|
-| 1 | `x-dsh-mcp-client` request header (or `--client` / `DSH_MCP_CLIENT` on the stdio bridge) | `codex` |
+| 1 | `x-dsh-mcp-client` request header (or `--client` / `DSH_MCP_CLIENT` on the stdio bridge); a version may follow as `name@version` | `codex`, `claude-code@2.1.295` |
 | 2 | the `clientInfo` block MCP clients send on `initialize`, cached per transport | `claude-code 2.0.1` |
 | 3 | `User-Agent` | `cursor/1.2` |
 | 4 | the auth peer (the bearer token, or DSH connection trust) | `token` |
 
-`dsh_whoami` returns the resolved identity, its `source` rung, and the sessions that agent created;
+A rung never borrows from a lower one: a caller that sets the header is named by that label alone, even
+if another client's `clientInfo` shares its User-Agent. `dsh_whoami` returns the resolved identity, its
+`source` rung, and the sessions that agent created;
 `dsh_list_sessions` annotates each row with `owner` and `mine`, and accepts `mine: true`. The registry
 lives in `$DSH_HOME/mcp/dsh-mcp-clients.json` (0600), so ownership survives a Harness restart.
 
@@ -294,7 +296,7 @@ private profile, with the token the server is configured with.
 
 ```bash
 node test/mcp-self-test.mjs            # 11 transport checks, no Harness needed
-node test/plugin-integration-test.mjs  # 53 checks: apply(), endpoint file, tools, transcript windows,
+node test/plugin-integration-test.mjs  # 55 checks: apply(), endpoint file, tools, transcript windows,
                                        # outline/paging/truncation, search, index cursors, waiting,
                                        # caller identity + restrictToOwner, archival tools, permissions,
                                        # commands, model pinning, hot-reload ownership
