@@ -47,7 +47,32 @@ function makeServices() {
   const modelSelections = []
   const cancelledSessions = []
   const runningSessions = new Set()
+  const extraSessions = []
+  const titleOverrides = new Map()
   let hang = false
+
+  /** Append synthetic transcript events, so read windows have something to page through. */
+  function seedMessages(specs) {
+    for (const spec of specs) {
+      const assistant = spec.role === 'assistant'
+      events.push({
+        type: assistant ? 'assistant/message' : 'user/message',
+        seq: ++seq,
+        time: Date.now(),
+        data: assistant
+          ? { message: { content: [{ type: 'text', text: spec.text }] } }
+          : { source: { kind: 'user' }, content: [{ type: 'text', text: spec.text }] },
+      })
+    }
+  }
+
+  /** Register extra list entries with their own titles, for paging and query coverage. */
+  function addSyntheticSessions(entries) {
+    for (const entry of entries) {
+      extraSessions.push(entry)
+      if (entry.title) titleOverrides.set(entry.sessionId, entry.title)
+    }
+  }
 
   /** The one live session the fake store hands back to the permission writer. */
   const liveSession = { id: 'live-session', append() {} }
@@ -176,14 +201,24 @@ function makeServices() {
     },
     async list() {
       return {
-        items: [{
-          sessionId: currentSessionId,
-          updatedAt: Date.now(),
-          running: runningSessions.has(currentSessionId),
-          blank: false,
-          agentAvailable: true,
-          cwd: '/tmp',
-        }],
+        items: [
+          {
+            sessionId: currentSessionId,
+            updatedAt: Date.now(),
+            running: runningSessions.has(currentSessionId),
+            blank: false,
+            agentAvailable: true,
+            cwd: '/tmp',
+          },
+          ...extraSessions.map((entry) => ({
+            sessionId: entry.sessionId,
+            updatedAt: entry.updatedAt ?? Date.now(),
+            running: entry.running === true,
+            blank: false,
+            agentAvailable: true,
+            cwd: entry.cwd ?? '/tmp',
+          })),
+        ],
       }
     },
   }
@@ -194,7 +229,11 @@ function makeServices() {
       return { session: { cwd: '/tmp', createdAt: Date.now() }, events, inheritedEventCount: 0 }
     },
     async readTitleSnapshots(ids) {
-      return ids.map((id) => ({ sessionId: id, status: 'fulfilled', value: { session: { id }, title: { title: 'Delegated task' } } }))
+      return ids.map((id) => ({
+        sessionId: id,
+        status: 'fulfilled',
+        value: { session: { id }, title: { title: titleOverrides.get(id) ?? 'Delegated task' } },
+      }))
     },
     async listSessions() {
       return [{ header: { id: currentSessionId }, live: true, persisted: true }]
@@ -249,6 +288,8 @@ function makeServices() {
       else runningSessions.delete(currentSessionId)
     },
     setHang: (value) => { hang = value },
+    seedMessages,
+    addSyntheticSessions,
     resolvedAgents: () => [...resolvedAgents],
     listedCommandAgents: () => [...listedCommandAgents],
     executedCommands: () => [...executedCommands],
@@ -258,7 +299,7 @@ function makeServices() {
 
 const dir = await mkdtemp(join(tmpdir(), 'dsh-mcp-test-'))
 const endpointFile = join(dir, 'dsh-mcp-endpoint.json')
-const { services, webServer, getPrompt, setBusy, archivedIds, appliedPermissions, modelSelections, cancelledSessions, setRunning, setHang, resolvedAgents, listedCommandAgents, executedCommands, currentId } = makeServices()
+const { services, webServer, getPrompt, setBusy, archivedIds, appliedPermissions, modelSelections, cancelledSessions, setRunning, setHang, seedMessages, addSyntheticSessions, resolvedAgents, listedCommandAgents, executedCommands, currentId } = makeServices()
 let sessionIdFromRun
 const disposers = []
 const ctx = makeContext(services, disposers)
@@ -354,7 +395,7 @@ try {
 
   const status = await call('dsh_status', {})
   assert.equal(status.defaultModel.model, 'deepseek-v4.1-flash-anthropic')
-  assert.equal(status.toolNames.length, 14)
+  assert.equal(status.toolNames.length, 15)
   assert.equal(status.defaultPermissionPreset, 'workspace-write')
   assert.deepEqual(status.permissionPresets.map((option) => option.value), ['read-only', 'workspace-write', 'danger-full-access'])
   checks.push('dsh_status reports the default model, tool names, and permission presets')
@@ -556,6 +597,99 @@ try {
   for (const dispose of strictDisposers) await dispose?.()
   await new Promise((resolve) => strictServer.close(resolve))
   await rm(strictDir, { recursive: true, force: true })
+
+  // --- progressive disclosure -------------------------------------------------
+  seedMessages([
+    { role: 'user', text: 'questions-1: start the survey' },
+    { role: 'assistant', text: 'questions-2: reading the asset pipeline first' },
+    { role: 'user', text: 'questions-3: also check the weapon mount' },
+    { role: 'assistant', text: 'questions-4: ' + 'y'.repeat(3000) },
+    { role: 'user', text: 'questions-5: needle-marker lives in this message' },
+    { role: 'assistant', text: 'questions-6: needle-marker follow-up' },
+    { role: 'user', text: 'questions-7: continue' },
+    { role: 'assistant', text: 'questions-8: continuing' },
+    { role: 'user', text: 'questions-9: continue' },
+    { role: 'assistant', text: 'questions-10: continuing' },
+    { role: 'user', text: 'questions-11: continue' },
+    { role: 'assistant', text: 'questions-12: done' },
+  ])
+
+  const outline = await call('dsh_read_session', { sessionId: created.sessionId, mode: 'outline', limit: 50 }, codex)
+  assert.equal(outline.mode, 'outline')
+  assert.equal(outline.messages.length, outline.matchedMessages)
+  assert.ok(outline.messages.every((row) => row.text === undefined && typeof row.preview === 'string' && Number.isInteger(row.chars)))
+  assert.ok(outline.messages.some((row) => row.chars > 2000))
+  checks.push('an outline read is a compact table of contents, not a transcript dump')
+
+  const tail = await call('dsh_read_session', { sessionId: created.sessionId }, codex)
+  assert.equal(tail.mode, 'tail')
+  assert.equal(tail.returned, 10)
+  assert.ok(tail.totalMessages > tail.returned)
+  assert.equal(tail.window.reachedEnd, true)
+  assert.ok(tail.window.firstSeq > outline.messages[0].seq)
+  checks.push('a default read is a bounded tail window that reports what it left out')
+
+  // `limit: 0` keeps the old "everything" meaning, so this window definitely holds the long turn.
+  const cut = await call('dsh_read_session', { sessionId: created.sessionId, limit: 0, maxChars: 100 }, codex)
+  const trimmed = cut.messages.find((row) => row.truncated === true)
+  assert.ok(trimmed, 'a long message must be flagged when it is cut')
+  assert.equal(trimmed.text.length, 100)
+  assert.ok(trimmed.chars > 100)
+  assert.ok(cut.truncatedMessages >= 1)
+  checks.push('long messages are cut at maxChars and report their real length')
+
+  const pageOne = await call('dsh_read_session', { sessionId: created.sessionId, mode: 'head', limit: 4 }, codex)
+  const pageTwo = await call('dsh_read_session', { sessionId: created.sessionId, mode: 'head', limit: 4, afterSeq: pageOne.window.nextAfterSeq }, codex)
+  assert.ok(pageTwo.messages.length > 0)
+  assert.ok(pageTwo.messages.every((row) => row.seq > pageOne.window.nextAfterSeq))
+  assert.ok(pageOne.messages.every((row) => row.seq <= pageOne.window.nextAfterSeq))
+  checks.push('afterSeq pages forward through a transcript without re-reading it')
+
+  const userOnly = await call('dsh_read_session', { sessionId: created.sessionId, mode: 'outline', limit: 50, roles: ['user'] }, codex)
+  assert.ok(userOnly.messages.every((row) => row.role === 'user'))
+  checks.push('roles narrows a read to the turns the caller cares about')
+
+  addSyntheticSessions([
+    { sessionId: 'session-index-1', title: 'asset pipeline survey', cwd: '/repo/alpha', updatedAt: Date.now() - 1000 },
+    { sessionId: 'session-index-2', title: 'weapon mount check', cwd: '/repo/beta', updatedAt: Date.now() - 2000 },
+  ])
+
+  const indexPage = await call('dsh_list_sessions', { limit: 1, view: 'index' }, codex)
+  assert.equal(indexPage.view, 'index')
+  assert.equal(indexPage.count, 1)
+  assert.equal('cwd' in indexPage.sessions[0], false)
+  assert.ok(indexPage.total >= 3)
+  assert.equal(indexPage.nextCursor, 1)
+  const secondPage = await call('dsh_list_sessions', { limit: 1, cursor: indexPage.nextCursor, view: 'full' }, codex)
+  assert.notEqual(secondPage.sessions[0].sessionId, indexPage.sessions[0].sessionId)
+  assert.equal(secondPage.view, 'full')
+  assert.equal(typeof secondPage.sessions[0].cwd, 'string')
+  checks.push('the session index is compact by default and pages with a cursor')
+
+  const byQuery = await call('dsh_list_sessions', { query: 'weapon', view: 'index' }, codex)
+  assert.deepEqual(byQuery.sessions.map((row) => row.sessionId), ['session-index-2'])
+  const byCwd = await call('dsh_list_sessions', { query: 'alpha' }, codex)
+  assert.deepEqual(byCwd.sessions.map((row) => row.sessionId), ['session-index-1'])
+  checks.push('query narrows the index server-side by title and cwd')
+
+  const titleHit = await call('dsh_search_sessions', { query: 'weapon', scope: 'title' }, codex)
+  assert.equal(titleHit.matchCount, 1)
+  assert.equal(titleHit.matches[0].where, 'title')
+  assert.equal(titleHit.matches[0].sessionId, 'session-index-2')
+  checks.push('a search matches sessions by title and returns a snippet')
+
+  const messageHit = await call('dsh_search_sessions', { query: 'needle-marker', scope: 'messages' }, codex)
+  assert.ok(messageHit.matches.length >= 1)
+  assert.ok(messageHit.matches.every((match) => match.where === 'message'))
+  assert.ok(messageHit.matches[0].snippet.includes('needle-marker'))
+  assert.ok(messageHit.matches[0].snippet.length <= 260)
+  assert.ok(messageHit.scanned >= 1)
+  checks.push('a search finds message text and returns a bounded snippet, not the transcript')
+
+  const toolQuery = await call('dsh_list_tools', { query: 'read' })
+  assert.equal(toolQuery.count, 1)
+  assert.equal(toolQuery.tools[0].name, 'read_file')
+  checks.push('dsh_list_tools narrows the catalog by query')
 
   // --- commands ---------------------------------------------------------------
   const commandList = await call('dsh_list_commands', { sessionId: currentId() })

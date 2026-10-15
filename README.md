@@ -24,15 +24,16 @@ other harness ──MCP (Streamable HTTP or stdio)──> DSH MCP Server ──>
 | `dsh_continue_session` | Send a prompt to an **existing** session (resuming it if it is cold). Keeps the session's context and workspace; `permissionPreset` re-pins the session's sandbox mode and approval policy before the prompt, and `model` (`provider/model`) overrides the session's model. Without `model` the session keeps the model it already runs. |
 | `dsh_list_commands` | The slash commands a session's agent can currently run: the global command layer plus whatever that agent's preset composes, so availability differs per agent preset. |
 | `dsh_run_command` | Run one slash command in a session and return its settled `{ kind, text, commandId }`. `line` takes a complete command line (`"/compact"`, `"/permission danger-full-access"`); `command` (+ optional `args`) takes a bare name. The command executes immediately without a model turn. |
-| `dsh_list_sessions` | Visible sessions with title, cwd, running state, archival state, last activity, and the recorded owning agent. `mine: true` (or the `restrictToOwner` setting) returns only the caller's own; `owner: "<id>"` returns one agent's. Archived sessions are hidden unless `includeArchived: true`, mirroring the Web UI. |
-| `dsh_read_session` | Ordered `{ role, text, seq }` transcript of one session (user-authored and assistant messages only), plus the last durable `permissionPreset` when the session has one. Works while the session is archived and needs no running turn. |
+| `dsh_list_sessions` | A page of the session index: `sessionId`, title, running state, archival state, activity time, and the recorded owning agent (`view: "full"` adds cwd and liveness). Narrow server-side with `query` (title/cwd/owner/id), `mine: true` (or the `restrictToOwner` setting), `owner: "<id>"`, and `running`; page with `cursor`/`nextCursor`. Archived sessions are hidden unless `includeArchived: true`, mirroring the Web UI. |
+| `dsh_read_session` | A window of one session's transcript (user-authored and assistant messages only), plus the last durable `permissionPreset`. `mode: "tail"` (default, last 10) / `"head"` / `"outline"` (one compact row per message with a preview and length, no full text); `roles`, `afterSeq` + `window.nextAfterSeq` to page, `maxChars` (default 2000) to cap a single answer. Reports `totalMessages`, `matchedMessages` and `returned`, so the caller always knows what it has not read. `limit: 0` still means everything. Works while the session is archived. |
 | `dsh_wait_session` | Block until the turn a session is already running ends, then return the assistant text it produced — for `wait: false` starts, GUI-driven sessions, or another caller's work. Never prompts, steers, or cancels: reaching `timeoutMs` returns `status: "timedOut"` with the turn still running, so call it again; `status: "idle"` returns immediately when nothing is running. |
+| `dsh_search_sessions` | Find sessions by content server-side and get bounded snippets instead of transcripts: title/cwd/owner/id (`scope: "title"`) or the messages themselves (`"messages"`, `"both"` by default). Looks at the newest `scan` sessions the caller can see (default 20), reports `where`/`seq`/`snippet` per match, and then `dsh_read_session` reads just that session. |
 | `dsh_whoami` | How this endpoint identifies the calling agent — `x-dsh-mcp-client` header, else `initialize` `clientInfo`, else `User-Agent` — plus the sessions that agent created. Attribution, not authentication: callers share the endpoint token. |
 | `dsh_cancel_session` | Cancel the active turn of a session without dropping its pending inbox. |
 | `dsh_archive_session` | Archive one session durably: hidden from every grouping surface, and it cannot run a model step until restored. A session with running work is refused unless `stopActivity: true` (which archives first, then stops that work). Archiving drops the pin. |
 | `dsh_unarchive_session` | Drop a session from the archive set; it is listed again and returns to its recorded workspace position. |
 | `dsh_list_permission_presets` | The deployment's permission presets (each bundles a sandbox mode with an approval policy) plus the default for new sessions, for the `permissionPreset` argument above. |
-| `dsh_list_tools` | The tools DSH exposes to its own agents, for choosing what a delegated prompt can do. |
+| `dsh_list_tools` | The tools DSH exposes to its own agents, for choosing what a delegated prompt can do; `query` narrows by name or description and `limit` caps the list. |
 | `dsh_status` | Endpoint, profile, version, session/live-agent counts, default model, active turns, and the default permission preset. |
 
 Archival needs the Host's `workspaceRegistry` service (`@deepseek-ai/dsh-workspace`). Without it the
@@ -57,6 +58,26 @@ through the same `commands.execute()` the Web composer uses: the handler runs im
 lifecycle is logged as `command/run` + `command/done`, and **no model turn is started**. `kind` is
 `success` or `error`; a line the Host would not parse as a command, or a name it does not know, is
 rejected with the available commands listed.
+
+### Progressive disclosure
+
+A session's log runs to megabytes and a Harness can hold hundreds of sessions, so no read is a dump:
+each tool takes the smallest question that answers what the caller needs, and every payload says what
+it did *not* return.
+
+| Need | Call |
+|---|---|
+| Which sessions exist? | `dsh_list_sessions({ mine: true, query: "tripothon", limit: 10 })` — index rows are id, title, running, archived, time, owner. |
+| The next page | `cursor: nextCursor` from the previous result. |
+| What is in a long session? | `dsh_read_session({ sessionId, mode: "outline" })` — role, seq, chars, preview per message. |
+| What just happened? | `dsh_read_session({ sessionId })` — the last 10 messages, with `window.reachedEnd`, `totalMessages` and `returned`. |
+| Walk it forward | `afterSeq: window.nextAfterSeq`, `roles: ["user"]`, `maxChars: 0` when the full text is really needed. |
+| Where was X mentioned? | `dsh_search_sessions({ query: "mount", mine: true })` — snippets from titles/cwd/owners and from the messages of the newest `scan` sessions. |
+| Which Harness tools exist? | `dsh_list_tools({ query: "file" })`. |
+
+Costs stay bounded by construction: `scan`, `limit`, `perSession` and `maxChars` are ceilings, not
+hints, and a cut message carries `truncated: true` with its real length rather than silently losing
+the tail.
 
 ### Caller identity and session ownership
 
@@ -273,11 +294,12 @@ private profile, with the token the server is configured with.
 
 ```bash
 node test/mcp-self-test.mjs            # 11 transport checks, no Harness needed
-node test/plugin-integration-test.mjs  # 43 checks: apply(), endpoint file, tools, transcript filter,
-                                       # waiting, caller identity + restrictToOwner, archival tools,
-                                       # permission presets, commands, model pinning, hot-reload ownership
+node test/plugin-integration-test.mjs  # 53 checks: apply(), endpoint file, tools, transcript windows,
+                                       # outline/paging/truncation, search, index cursors, waiting,
+                                       # caller identity + restrictToOwner, archival tools, permissions,
+                                       # commands, model pinning, hot-reload ownership
 node test/stdio-bridge-test.mjs        # 4 checks, needs a RUNNING Harness (one real delegated turn)
-node test/live-e2e-test.mjs            # 38 checks over HTTP: protocol, resources, all fourteen tools,
+node test/live-e2e-test.mjs            # 39 checks over HTTP: protocol, resources, all fifteen tools,
                                        # archive/unarchive, permission presets, commands, error paths,
                                        # 4 real turns (needs a Harness)
 ```
@@ -286,7 +308,8 @@ Live checks used during development also covered: a real MCP client exchange aga
 Harness, an end-to-end `dsh_run_prompt` → `dsh_continue_session` → `dsh_read_session` flow, permission
 presets applied and re-pinned over MCP and folded back out of the transcript, a command executed
 without adding a model message, waiting on a detached turn without cancelling it, caller identity
-over the header and User-Agent rungs, detached start + cancel, and the stdio bridge.
+over the header and User-Agent rungs, windowed/outlined transcript reads, detached start + cancel,
+and the stdio bridge.
 
 ## Notes and limitations
 

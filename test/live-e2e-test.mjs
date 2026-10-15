@@ -25,6 +25,7 @@ const EXPECTED_TOOLS = [
   'dsh_run_command',
   'dsh_list_sessions',
   'dsh_read_session',
+  'dsh_search_sessions',
   'dsh_wait_session',
   'dsh_whoami',
   'dsh_cancel_session',
@@ -190,6 +191,16 @@ assert.equal(idleWait.status, 'idle')
 assert.equal(idleWait.running, false)
 assert.equal(idleWait.messages.at(-1).role, 'assistant')
 oh('dsh_wait_session returns idle plus a transcript tail once the turn is over')
+
+const windowed = await call('dsh_read_session', { sessionId: run.sessionId })
+assert.equal(windowed.mode, 'tail')
+assert.ok(windowed.returned <= 10, 'the default read must be a window')
+assert.ok(windowed.totalMessages >= windowed.returned)
+assert.equal(typeof windowed.window.nextAfterSeq, 'number')
+const outlined = await call('dsh_read_session', { sessionId: run.sessionId, mode: 'outline', limit: 200 })
+assert.ok(outlined.messages.length > 0)
+assert.ok(outlined.messages.every((row) => row.text === undefined && typeof row.preview === 'string'))
+oh('a read is a bounded window by default and can outline the whole session')
 
 const repinned = await call('dsh_continue_session', {
   sessionId: run.sessionId,
