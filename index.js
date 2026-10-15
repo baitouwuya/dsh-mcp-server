@@ -18,11 +18,12 @@ import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 
 import { createDshCapabilities, DEFAULT_MAX_CONCURRENT_TURNS, DEFAULT_TURN_TIMEOUT_MS, INSTRUCTIONS } from './lib/dsh-capabilities.js'
+import { createClientRegistry, DEFAULT_CLIENT_FLUSH_MS, resolveCaller } from './lib/clients.js'
 import { createMcpHttpHandler } from './lib/http-route.js'
 import { McpGateway, SERVER_NAME } from './lib/protocol.js'
 
 /** Keep in sync with package.json; reported through `initialize`. */
-const VERSION = '0.2.0'
+const VERSION = '0.3.0'
 
 /** Cordis: wait for the Web carrier before registering the route. */
 export const inject = ['webServer']
@@ -95,6 +96,26 @@ export function apply(ctx, config = {}) {
   const maxConcurrentTurns = Number.isFinite(Number(config.maxConcurrentTurns))
     ? Math.max(1, Number(config.maxConcurrentTurns))
     : DEFAULT_MAX_CONCURRENT_TURNS
+  // Attribution is always on; `restrictToOwner` is the opt-in gate that turns it
+  // into isolation between callers that share this endpoint's token.
+  const restrictToOwner = config.restrictToOwner === true
+  const clientsFile = typeof config.clientsFile === 'string' && config.clientsFile
+    ? resolve(config.clientsFile)
+    : join(dshHome, 'mcp', 'dsh-mcp-clients.json')
+  const clientsFlushMs = Number.isFinite(Number(config.clientsFlushMs))
+    ? Math.max(0, Number(config.clientsFlushMs))
+    : DEFAULT_CLIENT_FLUSH_MS
+
+  /** Who called, and which sessions each caller created; survives a restart. */
+  const clients = createClientRegistry({ file: clientsFile, logger: log, flushMs: clientsFlushMs })
+  clients.load()
+  /** Fingerprint -> `initialize` clientInfo, so a name sticks across stateless requests. */
+  const clientInfoCache = new Map()
+  const identify = ({ headers, message, peer }) => clients.touch(resolveCaller({
+    headers,
+    clientInfo: message?.method === 'initialize' ? message.params?.clientInfo : undefined,
+    peer,
+  }, clientInfoCache))
 
   // A caller-supplied token is authoritative; otherwise mint one per process so
   // the endpoint is never open by accident, and publish it in the endpoint file.
@@ -132,6 +153,8 @@ export function apply(ctx, config = {}) {
   const instanceId = randomUUID()
   const capabilities = createDshCapabilities(ctx, {
     logger: log,
+    sessionOwners: clients,
+    restrictToOwner,
     defaultModel,
     defaultCwd: typeof config.defaultCwd === 'string' && config.defaultCwd ? resolve(config.defaultCwd) : undefined,
     turnTimeoutMs,
@@ -149,7 +172,7 @@ export function apply(ctx, config = {}) {
     callTool: (toolName, args, context) => capabilities.callTool(toolName, args, context),
     listResources: () => capabilities.listResources(),
     listResourceTemplates: () => capabilities.listResourceTemplates(),
-    readResource: (uri) => capabilities.readResource(uri),
+    readResource: (uri, context) => capabilities.readResource(uri, context),
     logger: log,
   })
 
@@ -179,6 +202,7 @@ export function apply(ctx, config = {}) {
   const handler = createMcpHttpHandler({
     gateway,
     authorize,
+    identify,
     logger: log,
     path,
     maxBodyBytes: Number.isFinite(Number(config.maxBodyBytes)) ? Number(config.maxBodyBytes) : undefined,
@@ -250,6 +274,7 @@ export function apply(ctx, config = {}) {
       log('debug', 'route disposal failed', { error: error instanceof Error ? error.message : String(error) })
     }
     removeOwnEndpointFile()
+    clients.flush()
     log('info', 'dsh-mcp-server stopped')
   }, 'dsh-mcp-server.dispose')
 
@@ -258,6 +283,8 @@ export function apply(ctx, config = {}) {
     path,
     auth: configuredToken ? 'configured bearer token' : 'generated bearer token',
     tools: capabilities.tools.length,
+    clients: clientsFile,
+    restrictToOwner,
     instance: instanceId,
   })
 }

@@ -15,6 +15,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { createClientRegistry } from '../lib/clients.js'
 import { apply } from '../index.js'
 
 const PROMPT = 'delegate this task'
@@ -262,7 +263,7 @@ let sessionIdFromRun
 const disposers = []
 const ctx = makeContext(services, disposers)
 
-apply(ctx, { token: 'integration-token', endpointFile, url: 'http://127.0.0.1:9', dshHome: dir })
+apply(ctx, { token: 'integration-token', endpointFile, url: 'http://127.0.0.1:9', dshHome: dir, clientsFlushMs: 20 })
 
 assert.equal(webServer.registered.length, 1, 'the plugin registers exactly one route')
 assert.equal(webServer.registered[0].kind, 'exact')
@@ -274,10 +275,10 @@ const port = await new Promise((resolve) => {
 })
 const address = `http://127.0.0.1:${port.address().port}/mcp`
 
-async function rpc(message) {
+async function rpc(message, { headers: extraHeaders = {} } = {}) {
   const response = await fetch(address, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: 'Bearer integration-token' },
+    headers: { 'content-type': 'application/json', authorization: 'Bearer integration-token', ...extraHeaders },
     body: JSON.stringify(message),
   })
   const text = await response.text()
@@ -285,8 +286,8 @@ async function rpc(message) {
 }
 
 let id = 0
-async function call(name, args) {
-  const body = await rpc({ jsonrpc: '2.0', id: ++id, method: 'tools/call', params: { name, arguments: args } })
+async function call(name, args, options) {
+  const body = await rpc({ jsonrpc: '2.0', id: ++id, method: 'tools/call', params: { name, arguments: args } }, options)
   assert.ok(!body.error, `${name} returned a protocol error: ${JSON.stringify(body.error)}`)
   assert.ok(!body.result.isError, `${name} returned a tool error: ${body.result.content?.[0]?.text}`)
   return body.result.structuredContent ?? JSON.parse(body.result.content[0].text)
@@ -353,7 +354,7 @@ try {
 
   const status = await call('dsh_status', {})
   assert.equal(status.defaultModel.model, 'deepseek-v4.1-flash-anthropic')
-  assert.equal(status.toolNames.length, 13)
+  assert.equal(status.toolNames.length, 14)
   assert.equal(status.defaultPermissionPreset, 'workspace-write')
   assert.deepEqual(status.permissionPresets.map((option) => option.value), ['read-only', 'workspace-write', 'danger-full-access'])
   checks.push('dsh_status reports the default model, tool names, and permission presets')
@@ -454,14 +455,107 @@ try {
   assert.match(unknownPreset.result.content[0].text, /read-only/)
   checks.push('an unknown permission preset fails and lists the available ones')
 
-  const cold = await call('dsh_continue_session', { sessionId: 'session-cold', prompt: PROMPT, permissionPreset: 'workspace-write' })
+  const cold = await call('dsh_continue_session', { sessionId: 'session-cold', prompt: PROMPT, permissionPreset: 'workspace-write' }, { headers: { 'x-dsh-mcp-client': 'claude-code' } })
   assert.equal(cold.permissionPreset, 'workspace-write')
+  assert.equal(cold.owner.id, 'claude-code')
+  assert.equal(cold.owner.adopted, true)
   assert.deepEqual(resolvedAgents(), ['session-cold'])
   assert.deepEqual(appliedPermissions(), ['read-only', 'danger-full-access', 'workspace-write'])
   checks.push('a session the store does not hold is resumed through resolveAgent before pinning')
 
   assert.equal(modelSelections().length, 3, 'a resumed session without "model" must not re-pin the session model')
   checks.push('resuming a session without "model" leaves its model alone')
+
+  // --- caller identity and session ownership ----------------------------------
+  const codex = { headers: { 'x-dsh-mcp-client': 'codex' } }
+  const claude = { headers: { 'x-dsh-mcp-client': 'claude-code' } }
+
+  // Node's fetch sends a User-Agent, so an unlabelled caller lands on that rung of
+  // the ladder rather than the bare peer fallback.
+  const anonymous = await call('dsh_whoami', {})
+  assert.ok(
+    ['user-agent', 'peer'].includes(anonymous.client.source),
+    `unexpected identity source: ${anonymous.client.source}`,
+  )
+  assert.notEqual(anonymous.client.id, 'codex')
+  assert.notEqual(anonymous.client.id, 'claude-code')
+  checks.push('a caller that sends no label falls back to User-Agent or the auth peer')
+
+  const claudeWho = await call('dsh_whoami', {}, claude)
+  assert.equal(claudeWho.client.id, 'claude-code')
+  assert.equal(claudeWho.client.source, 'header')
+  assert.deepEqual(claudeWho.ownedSessions.map((entry) => entry.sessionId), ['session-cold'])
+  checks.push('dsh_whoami names the caller and lists the session it adopted')
+
+  const codexWho = await call('dsh_whoami', {}, codex)
+  assert.equal(codexWho.ownedSessionCount, 0)
+  checks.push('a caller owns nothing before it creates a session')
+
+  const created = await call('dsh_run_prompt', { prompt: PROMPT, cwd: '/tmp' }, codex)
+  assert.equal(created.owner.id, 'codex')
+  const mine = await call('dsh_list_sessions', { limit: 20, mine: true }, codex)
+  assert.deepEqual(mine.sessions.map((session) => session.sessionId), [created.sessionId])
+  assert.equal(mine.sessions[0].mine, true)
+  assert.equal(mine.sessions[0].owner.id, 'codex')
+  const byOwner = await call('dsh_list_sessions', { limit: 20, owner: 'codex' }, claude)
+  assert.deepEqual(byOwner.sessions.map((session) => session.sessionId), [created.sessionId])
+  checks.push('dsh_run_prompt records the creating agent, and mine/owner filter the listing')
+
+  const other = await call('dsh_list_sessions', { limit: 20 }, claude)
+  assert.equal(other.sessions[0].owner.id, 'codex')
+  assert.equal(other.sessions[0].mine, false)
+  assert.deepEqual((await call('dsh_list_sessions', { limit: 20, mine: true }, claude)).sessions, [])
+  checks.push('another caller sees the owner but never counts that session as its own')
+
+  await new Promise((resolve) => setTimeout(resolve, 80))
+  const persisted = createClientRegistry({ file: join(dir, 'mcp', 'dsh-mcp-clients.json') })
+  persisted.load()
+  assert.equal(persisted.ownerOf(created.sessionId)?.ownerId, 'codex')
+  assert.ok(persisted.clientOf('claude-code'))
+  assert.ok(persisted.clientOf(anonymous.client.id))
+  checks.push('the caller registry is persisted and reloads after a restart')
+
+  // --- restrictToOwner --------------------------------------------------------
+  const strictDir = await mkdtemp(join(tmpdir(), 'dsh-mcp-strict-'))
+  const strict = makeServices()
+  const strictDisposers = []
+  apply(makeContext(strict.services, strictDisposers), {
+    token: 'strict-token',
+    endpointFile: join(strictDir, 'dsh-mcp-endpoint.json'),
+    url: 'http://127.0.0.1:9',
+    dshHome: strictDir,
+    restrictToOwner: true,
+  })
+  const strictServer = await new Promise((resolve) => {
+    const server = createServer((req, res) => { void strict.webServer.registered[0].handler(req, res) })
+    server.listen(0, '127.0.0.1', () => resolve(server))
+  })
+  const strictAddress = `http://127.0.0.1:${strictServer.address().port}/mcp`
+  const strictCall = async (name, args, headers) => {
+    const response = await fetch(strictAddress, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer strict-token', ...headers },
+      body: JSON.stringify({ jsonrpc: '2.0', id: ++id, method: 'tools/call', params: { name, arguments: args } }),
+    })
+    return JSON.parse(await response.text())
+  }
+  const strictCreated = await strictCall('dsh_run_prompt', { prompt: PROMPT, cwd: '/tmp' }, { 'x-dsh-mcp-client': 'codex' })
+  const strictSession = strictCreated.result.structuredContent.sessionId
+  const borrowed = await strictCall('dsh_read_session', { sessionId: strictSession }, { 'x-dsh-mcp-client': 'claude-code' })
+  assert.ok(borrowed.result.isError, 'a restricted endpoint must refuse another caller')
+  assert.match(borrowed.result.content[0].text, /restrictToOwner/)
+  assert.deepEqual(
+    (await strictCall('dsh_list_sessions', { limit: 20 }, { 'x-dsh-mcp-client': 'claude-code' })).result.structuredContent.sessions,
+    [],
+  )
+  assert.deepEqual(
+    (await strictCall('dsh_list_sessions', { limit: 20 }, { 'x-dsh-mcp-client': 'codex' })).result.structuredContent.sessions.map((session) => session.sessionId),
+    [strictSession],
+  )
+  checks.push('restrictToOwner confines every caller to the sessions it created')
+  for (const dispose of strictDisposers) await dispose?.()
+  await new Promise((resolve) => strictServer.close(resolve))
+  await rm(strictDir, { recursive: true, force: true })
 
   // --- commands ---------------------------------------------------------------
   const commandList = await call('dsh_list_commands', { sessionId: currentId() })

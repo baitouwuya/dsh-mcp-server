@@ -26,6 +26,7 @@ const EXPECTED_TOOLS = [
   'dsh_list_sessions',
   'dsh_read_session',
   'dsh_wait_session',
+  'dsh_whoami',
   'dsh_cancel_session',
   'dsh_archive_session',
   'dsh_unarchive_session',
@@ -34,13 +35,14 @@ const EXPECTED_TOOLS = [
   'dsh_status',
 ]
 
-async function post(message, { auth = true, token: override, timeoutMs = 300_000 } = {}) {
+async function post(message, { auth = true, token: override, timeoutMs = 300_000, headers = {} } = {}) {
   const response = await fetch(url, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
       accept: 'application/json, text/event-stream',
       ...(auth ? { authorization: `Bearer ${override ?? token}` } : {}),
+      ...headers,
     },
     body: typeof message === 'string' ? message : JSON.stringify(message),
     signal: AbortSignal.timeout(timeoutMs),
@@ -125,6 +127,22 @@ const status = await call('dsh_status')
 assert.equal(status.server, 'dsh-mcp-server')
 assert.deepEqual([...status.toolNames].sort(), [...EXPECTED_TOOLS].sort())
 oh('dsh_status reports the endpoint, counts, default model, and tool names')
+
+const who = await call('dsh_whoami')
+assert.equal(typeof who.client.id, 'string')
+assert.ok(['header', 'initialize', 'initialize-cache', 'user-agent', 'peer'].includes(who.client.source))
+assert.ok(Array.isArray(who.ownedSessions))
+assert.ok(who.ownedSessionCount >= who.ownedSessions.length, 'the listed page cannot exceed the count')
+oh('dsh_whoami reports the calling agent and the sessions it owns')
+
+const named = await post(
+  { jsonrpc: '2.0', id: ++nextId, method: 'tools/call', params: { name: 'dsh_whoami', arguments: {} } },
+  { headers: { 'x-dsh-mcp-client': 'live-e2e' } },
+)
+const namedWho = JSON.parse(named.body.result.content[0].text)
+assert.equal(namedWho.client.id, 'live-e2e')
+assert.equal(namedWho.client.source, 'header')
+oh('an x-dsh-mcp-client header names the caller')
 
 const tools = await call('dsh_list_tools')
 assert.ok(tools.count > 0 && tools.tools[0].name)

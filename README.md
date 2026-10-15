@@ -8,6 +8,8 @@ client — can call DSH: start sessions, drive turns, wait for them, read transc
 
 The plugin is a Host-only bundle with **zero dependencies** (no DSH import, no third-party module),
 so it installs into a profile and survives Harness upgrades that keep the service contracts.
+Every request is attributed to the calling agent and every session is recorded against its creator,
+so several harnesses can share one endpoint and still ask "which sessions are mine?".
 
 ```
 other harness ──MCP (Streamable HTTP or stdio)──> DSH MCP Server ──> DSH services
@@ -22,9 +24,10 @@ other harness ──MCP (Streamable HTTP or stdio)──> DSH MCP Server ──>
 | `dsh_continue_session` | Send a prompt to an **existing** session (resuming it if it is cold). Keeps the session's context and workspace; `permissionPreset` re-pins the session's sandbox mode and approval policy before the prompt, and `model` (`provider/model`) overrides the session's model. Without `model` the session keeps the model it already runs. |
 | `dsh_list_commands` | The slash commands a session's agent can currently run: the global command layer plus whatever that agent's preset composes, so availability differs per agent preset. |
 | `dsh_run_command` | Run one slash command in a session and return its settled `{ kind, text, commandId }`. `line` takes a complete command line (`"/compact"`, `"/permission danger-full-access"`); `command` (+ optional `args`) takes a bare name. The command executes immediately without a model turn. |
-| `dsh_list_sessions` | Visible sessions with title, cwd, running state, archival state, and last activity. Archived sessions are hidden unless `includeArchived: true`, mirroring the Web UI. |
+| `dsh_list_sessions` | Visible sessions with title, cwd, running state, archival state, last activity, and the recorded owning agent. `mine: true` (or the `restrictToOwner` setting) returns only the caller's own; `owner: "<id>"` returns one agent's. Archived sessions are hidden unless `includeArchived: true`, mirroring the Web UI. |
 | `dsh_read_session` | Ordered `{ role, text, seq }` transcript of one session (user-authored and assistant messages only), plus the last durable `permissionPreset` when the session has one. Works while the session is archived and needs no running turn. |
 | `dsh_wait_session` | Block until the turn a session is already running ends, then return the assistant text it produced — for `wait: false` starts, GUI-driven sessions, or another caller's work. Never prompts, steers, or cancels: reaching `timeoutMs` returns `status: "timedOut"` with the turn still running, so call it again; `status: "idle"` returns immediately when nothing is running. |
+| `dsh_whoami` | How this endpoint identifies the calling agent — `x-dsh-mcp-client` header, else `initialize` `clientInfo`, else `User-Agent` — plus the sessions that agent created. Attribution, not authentication: callers share the endpoint token. |
 | `dsh_cancel_session` | Cancel the active turn of a session without dropping its pending inbox. |
 | `dsh_archive_session` | Archive one session durably: hidden from every grouping surface, and it cannot run a model step until restored. A session with running work is refused unless `stopActivity: true` (which archives first, then stops that work). Archiving drops the pin. |
 | `dsh_unarchive_session` | Drop a session from the archive set; it is listed again and returns to its recorded workspace position. |
@@ -54,6 +57,29 @@ through the same `commands.execute()` the Web composer uses: the handler runs im
 lifecycle is logged as `command/run` + `command/done`, and **no model turn is started**. `kind` is
 `success` or `error`; a line the Host would not parse as a command, or a name it does not know, is
 rejected with the available commands listed.
+
+### Caller identity and session ownership
+
+Every request is attributed to a calling agent and every session `dsh_run_prompt` creates is recorded
+against that agent, so a shared endpoint can answer "which sessions did *this* agent start?":
+
+| Rung | Signal | Example |
+|---|---|---|
+| 1 | `x-dsh-mcp-client` request header (or `--client` / `DSH_MCP_CLIENT` on the stdio bridge) | `codex` |
+| 2 | the `clientInfo` block MCP clients send on `initialize`, cached per transport | `claude-code 2.0.1` |
+| 3 | `User-Agent` | `cursor/1.2` |
+| 4 | the auth peer (the bearer token, or DSH connection trust) | `token` |
+
+`dsh_whoami` returns the resolved identity, its `source` rung, and the sessions that agent created;
+`dsh_list_sessions` annotates each row with `owner` and `mine`, and accepts `mine: true`. The registry
+lives in `$DSH_HOME/mcp/dsh-mcp-clients.json` (0600), so ownership survives a Harness restart.
+
+This is **attribution, not authentication**: every caller presents the same endpoint token, and a
+client may name itself anything with the header. Set `restrictToOwner: true` to turn the record into
+isolation — a caller can then only list, read, wait on, continue, cancel, archive, or run commands in
+the sessions it created (or adopted: a session with no recorded owner, such as one the GUI started,
+is adopted by the first caller that drives it). A session owned by someone else is refused with a
+diagnostic naming the owner.
 
 Resources: `dsh://status`, `dsh://sessions`, and the template `dsh://session/{sessionId}`.
 
@@ -122,6 +148,9 @@ The bundle row in `cordis.patch.yml` accepts (all optional):
 | `defaultModel` | Harness default model | `{ provider, model, reasoningEffort? }` for **newly started** sessions without an explicit `model`. A continued session keeps the model it already runs. |
 | `turnTimeoutMs` | `1800000` | Default wait ceiling for a tool call that waits for a turn. Reaching it stops the wait, never the turn. |
 | `maxConcurrentTurns` | `8` | Concurrent waited turns before new calls queue. `dsh_wait_session` starts no turn and takes no slot. |
+| `restrictToOwner` | `false` | Confine each caller to the sessions it created or adopted: other sessions are refused by id, and `dsh_list_sessions` returns only its own. |
+| `clientsFile` | `$DSH_HOME/mcp/dsh-mcp-clients.json` | Where the caller registry (agents seen + session owners) is kept, mode 0600. |
+| `clientsFlushMs` | `5000` | How long registry writes are coalesced before they hit disk. |
 | `maxBodyBytes` | `8388608` | Request body ceiling. |
 | `instructions` | built-in text | Replaces the instructions handed to the calling model. |
 
@@ -172,7 +201,10 @@ Point the client at the endpoint with the bearer token:
 ```
 
 It forwards JSON-RPC messages verbatim, cancels the upstream request when the client sends
-`notifications/cancelled`, and keeps stdout clean (diagnostics go to stderr).
+`notifications/cancelled`, and keeps stdout clean (diagnostics go to stderr). It also names its
+launcher to the endpoint through `x-dsh-mcp-client`, from `--client <label>`, else
+`DSH_MCP_CLIENT`, else the parent process name, else `stdio-bridge` — set the variable in the other
+harness' MCP server config when the parent is a bare runtime such as `node`.
 
 Because GUI clients launch with a minimal `PATH`, point `command` at an absolute Node binary and rely
 on the bridge's `~/.dsh` discovery (both verified with only `HOME` and `PATH` set):
@@ -241,11 +273,11 @@ private profile, with the token the server is configured with.
 
 ```bash
 node test/mcp-self-test.mjs            # 11 transport checks, no Harness needed
-node test/plugin-integration-test.mjs  # 36 checks: apply(), endpoint file, tools, transcript filter,
-                                       # waiting, archival tools, permission presets, commands,
-                                       # model pinning, hot-reload ownership
+node test/plugin-integration-test.mjs  # 43 checks: apply(), endpoint file, tools, transcript filter,
+                                       # waiting, caller identity + restrictToOwner, archival tools,
+                                       # permission presets, commands, model pinning, hot-reload ownership
 node test/stdio-bridge-test.mjs        # 4 checks, needs a RUNNING Harness (one real delegated turn)
-node test/live-e2e-test.mjs            # 36 checks over HTTP: protocol, resources, all thirteen tools,
+node test/live-e2e-test.mjs            # 38 checks over HTTP: protocol, resources, all fourteen tools,
                                        # archive/unarchive, permission presets, commands, error paths,
                                        # 4 real turns (needs a Harness)
 ```
@@ -253,8 +285,8 @@ node test/live-e2e-test.mjs            # 36 checks over HTTP: protocol, resource
 Live checks used during development also covered: a real MCP client exchange against the running
 Harness, an end-to-end `dsh_run_prompt` → `dsh_continue_session` → `dsh_read_session` flow, permission
 presets applied and re-pinned over MCP and folded back out of the transcript, a command executed
-without adding a model message, waiting on a detached turn without cancelling it, detached start
-+ cancel, and the stdio bridge.
+without adding a model message, waiting on a detached turn without cancelling it, caller identity
+over the header and User-Agent rungs, detached start + cancel, and the stdio bridge.
 
 ## Notes and limitations
 

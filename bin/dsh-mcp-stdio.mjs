@@ -14,10 +14,14 @@
  *   3. `${DSH_HOME}/mcp/dsh-mcp-endpoint.json`, written by the plugin.
  *      `DSH_HOME` defaults to `~/.dsh`.
  *
+ * It also tells the endpoint which agent it is: `--client <label>`, else
+ * `DSH_MCP_CLIENT`, else the process that launched it, else `stdio-bridge`.
+ *
  * Usage in another harness' MCP configuration:
  *   { "command": "node", "args": ["<plugin-dir>/bin/dsh-mcp-stdio.mjs"] }
  */
 
+import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -66,6 +70,35 @@ function resolveEndpoint() {
 
 const log = (...parts) => process.stderr.write(STDERR_PREFIX + parts.join(' ') + '\n')
 
+/** Parents that name a runtime rather than the agent that launched this bridge. */
+const RUNTIME_PARENTS = new Set([
+  'node', 'nodejs', 'bun', 'deno', 'python', 'python3', 'sh', 'bash', 'zsh', 'env',
+  'cmd', 'cmd.exe', 'powershell', 'pwsh',
+])
+
+/** Best-effort name of the process that launched this bridge, i.e. the MCP client. */
+function parentProcessName() {
+  if (process.platform === 'win32') return undefined
+  try {
+    const out = execFileSync('ps', ['-o', 'comm=', '-p', String(process.ppid)], { encoding: 'utf8', timeout: 2000 })
+    const name = out.trim().split('/').pop()
+    return name || undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** The label this bridge reports to the DSH endpoint, sent as `x-dsh-mcp-client`. */
+function resolveClientLabel() {
+  const configured = args.client ?? process.env.DSH_MCP_CLIENT
+  if (typeof configured === 'string' && configured.trim()) return configured.trim()
+  const parent = parentProcessName()
+  if (parent && !RUNTIME_PARENTS.has(parent.toLowerCase())) return `stdio:${parent}`
+  return 'stdio-bridge'
+}
+
+const clientLabel = resolveClientLabel()
+
 /** Emit one JSON-RPC message as a single stdout line. */
 function writeMessage(message) {
   process.stdout.write(JSON.stringify(message) + '\n')
@@ -73,6 +106,7 @@ function writeMessage(message) {
 
 const inFlight = new Map()
 let endpoint = resolveEndpoint()
+log(`identifying as "${clientLabel}"`)
 let closing = false
 
 /** Build the JSON-RPC error used when the DSH endpoint cannot be reached. */
@@ -114,6 +148,7 @@ async function forward(message) {
         'content-type': 'application/json',
         accept: 'application/json, text/event-stream',
         ...(endpoint.token ? { authorization: `Bearer ${endpoint.token}` } : {}),
+        'x-dsh-mcp-client': clientLabel,
       },
       body: JSON.stringify(message),
       signal: controller.signal,
