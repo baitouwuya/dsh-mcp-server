@@ -26,6 +26,7 @@ const EXPECTED_TOOLS = [
   'dsh_list_sessions',
   'dsh_read_session',
   'dsh_search_sessions',
+  'dsh_list_requests',
   'dsh_wait_session',
   'dsh_whoami',
   'dsh_cancel_session',
@@ -201,6 +202,12 @@ const outlined = await call('dsh_read_session', { sessionId: run.sessionId, mode
 assert.ok(outlined.messages.length > 0)
 assert.ok(outlined.messages.every((row) => row.text === undefined && typeof row.preview === 'string'))
 oh('a read is a bounded window by default and can outline the whole session')
+
+const requests = await call('dsh_list_requests', { sessionId: run.sessionId })
+assert.equal(typeof requests.count, 'number')
+assert.ok(Array.isArray(requests.sessions))
+assert.ok(typeof requests.note === 'string')
+oh('dsh_list_requests reports pending user decisions for a session')
 
 const repinned = await call('dsh_continue_session', {
   sessionId: run.sessionId,

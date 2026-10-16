@@ -66,6 +66,11 @@ function makeServices() {
     }
   }
 
+  /** Append raw session events, for folding approvals and questions. */
+  function seedEvents(specs) {
+    for (const spec of specs) events.push({ seq: ++seq, time: Date.now(), ...spec })
+  }
+
   /** Register extra list entries with their own titles, for paging and query coverage. */
   function addSyntheticSessions(entries) {
     for (const entry of entries) {
@@ -289,6 +294,7 @@ function makeServices() {
     },
     setHang: (value) => { hang = value },
     seedMessages,
+    seedEvents,
     addSyntheticSessions,
     resolvedAgents: () => [...resolvedAgents],
     listedCommandAgents: () => [...listedCommandAgents],
@@ -299,7 +305,7 @@ function makeServices() {
 
 const dir = await mkdtemp(join(tmpdir(), 'dsh-mcp-test-'))
 const endpointFile = join(dir, 'dsh-mcp-endpoint.json')
-const { services, webServer, getPrompt, setBusy, archivedIds, appliedPermissions, modelSelections, cancelledSessions, setRunning, setHang, seedMessages, addSyntheticSessions, resolvedAgents, listedCommandAgents, executedCommands, currentId } = makeServices()
+const { services, webServer, getPrompt, setBusy, archivedIds, appliedPermissions, modelSelections, cancelledSessions, setRunning, setHang, seedMessages, seedEvents, addSyntheticSessions, resolvedAgents, listedCommandAgents, executedCommands, currentId } = makeServices()
 let sessionIdFromRun
 const disposers = []
 const ctx = makeContext(services, disposers)
@@ -395,7 +401,7 @@ try {
 
   const status = await call('dsh_status', {})
   assert.equal(status.defaultModel.model, 'deepseek-v4.1-flash-anthropic')
-  assert.equal(status.toolNames.length, 15)
+  assert.equal(status.toolNames.length, 16)
   assert.equal(status.defaultPermissionPreset, 'workspace-write')
   assert.deepEqual(status.permissionPresets.map((option) => option.value), ['read-only', 'workspace-write', 'danger-full-access'])
   checks.push('dsh_status reports the default model, tool names, and permission presets')
@@ -715,6 +721,50 @@ try {
   assert.equal(toolQuery.count, 1)
   assert.equal(toolQuery.tools[0].name, 'read_file')
   checks.push('dsh_list_tools narrows the catalog by query')
+
+  // --- pending user decisions --------------------------------------------------
+  seedEvents([
+    { type: 'approval/asked', data: { id: 'app-open', toolName: 'bash', callId: 'call-1', reason: 'escalate sandbox to danger-full-access: ' + 'r'.repeat(400) } },
+    { type: 'approval/asked', data: { id: 'app-done', toolName: 'read', callId: 'call-2', reason: 'auto review denied tool "read"' } },
+    { type: 'approval/decided', data: { id: 'app-done', outcome: 'cancelled' } },
+    { type: 'tool/call', data: { name: 'ask_user_question', callId: 'call-q', arguments: JSON.stringify({ questions: [{ id: 'q1', question: 'Ship it?', header: 'Confirm', options: [{ label: 'yes' }, { label: 'no' }] }] }) } },
+    { type: 'tool/result', data: { message: { toolCallId: 'call-q', content: [{ type: 'text', text: JSON.stringify({ pending: true }) }] } } },
+    { type: 'tool/call', data: { name: 'ask_user_question', callId: 'call-q2', arguments: JSON.stringify({ questions: [{ id: 'q2', question: 'Which one?' }] }) } },
+    { type: 'tool/result', data: { message: { toolCallId: 'call-q2', content: [{ type: 'text', text: JSON.stringify({ answers: [{ id: 'q2', selected: ['a'] }] }) }] } } },
+    { type: 'tool/call', data: { name: 'read_file', callId: 'call-3', arguments: '{}' } },
+  ])
+
+  const requests = await call('dsh_list_requests', { sessionId: created.sessionId, includeSettled: true }, codex)
+  assert.equal(requests.count, 1)
+  assert.equal(requests.sessions[0].sessionId, created.sessionId)
+  assert.equal(requests.sessions[0].pending.count, 2)
+  assert.deepEqual(requests.sessions[0].pending.approvals.map((row) => row.id), ['app-open'])
+  assert.equal(requests.sessions[0].pending.approvals[0].toolName, 'bash')
+  assert.ok(requests.sessions[0].pending.approvals[0].reason.length <= 241, 'a long reason must be elided')
+  assert.ok(requests.sessions[0].pending.approvals[0].reason.endsWith('…'))
+  assert.deepEqual(requests.sessions[0].pending.questions.map((row) => row.callId), ['call-q'])
+  assert.equal(requests.sessions[0].pending.questions[0].state, 'continued')
+  assert.equal(requests.sessions[0].pending.questions[0].questions[0].question, 'Ship it?')
+  assert.deepEqual(requests.sessions[0].settled.approvals.map((row) => row.outcome), ['cancelled'])
+  assert.deepEqual(requests.sessions[0].settled.questions.map((row) => row.callId), ['call-q2'])
+  checks.push('dsh_list_requests folds pending approvals and questions, and settled ones on request')
+
+  const pendingRead = await call('dsh_read_session', { sessionId: created.sessionId, mode: 'outline', limit: 3 }, codex)
+  assert.equal(pendingRead.pending.count, 2)
+  assert.equal(pendingRead.pending.approvals[0].id, 'app-open')
+  checks.push('a read reports the user decisions the session is blocked on')
+
+  const pendingWait = await call('dsh_wait_session', { sessionId: created.sessionId }, codex)
+  assert.equal(pendingWait.status, 'idle')
+  assert.equal(pendingWait.pending.count, 2)
+  assert.deepEqual(pendingWait.pending.questions.map((row) => row.callId), ['call-q'])
+  checks.push('a wait reports pending decisions instead of leaving a blocked turn unexplained')
+
+  const mineRequests = await call('dsh_list_requests', { mine: true, scan: 5 }, codex)
+  assert.equal(mineRequests.count, 1)
+  assert.equal(mineRequests.includeSettled, undefined)
+  assert.equal(mineRequests.sessions[0].settled, undefined)
+  checks.push('a request scan is scoped to the caller and omits settled decisions by default')
 
   // --- commands ---------------------------------------------------------------
   const commandList = await call('dsh_list_commands', { sessionId: currentId() })

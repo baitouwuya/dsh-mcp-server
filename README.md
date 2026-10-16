@@ -27,6 +27,7 @@ other harness ──MCP (Streamable HTTP or stdio)──> DSH MCP Server ──>
 | `dsh_list_sessions` | A page of the session index: `sessionId`, title, running state, archival state, activity time, and the recorded owning agent (`view: "full"` adds cwd and liveness). Narrow server-side with `query` (title/cwd/owner/id), `mine: true` (or the `restrictToOwner` setting), `owner: "<id>"`, and `running`; page with `cursor`/`nextCursor`. Archived sessions are hidden unless `includeArchived: true`, mirroring the Web UI. |
 | `dsh_read_session` | A window of one session's transcript (user-authored and assistant messages only), plus the last durable `permissionPreset`. `mode: "tail"` (default, last 10) / `"head"` / `"outline"` (one compact row per message with a preview and length, no full text); `roles`, `afterSeq` + `window.nextAfterSeq` to page, `maxChars` (default 2000) to cap a single answer. Reports `totalMessages`, `matchedMessages` and `returned`, so the caller always knows what it has not read. `limit: 0` still means everything. Works while the session is archived. |
 | `dsh_wait_session` | Block until the turn a session is already running ends, then return the assistant text it produced — for `wait: false` starts, GUI-driven sessions, or another caller's work. Never prompts, steers, or cancels: reaching `timeoutMs` returns `status: "timedOut"` with the turn still running, so call it again; `status: "idle"` returns immediately when nothing is running. |
+| `dsh_list_requests` | The user decisions a session — or the newest visible sessions, running first — is waiting on: approval requests (`approval/asked` with no matching `approval/decided`, the one-shot permission decision behind a sandbox escalation) and unanswered `ask_user_question` calls, with tool, reason, call id and seq. These audit events are invisible to the model, so this is how a caller learns *why* a delegated turn stopped progressing. Reporting only: the decision is granted in the Harness GUI. |
 | `dsh_search_sessions` | Find sessions by content server-side and get bounded snippets instead of transcripts: title/cwd/owner/id (`scope: "title"`) or the messages themselves (`"messages"`, `"both"` by default). Looks at the newest `scan` sessions the caller can see (default 20), reports `where`/`seq`/`snippet` per match, and then `dsh_read_session` reads just that session. |
 | `dsh_whoami` | How this endpoint identifies the calling agent — `x-dsh-mcp-client` header, else `initialize` `clientInfo`, else `User-Agent` — plus the sessions that agent created. Attribution, not authentication: callers share the endpoint token. |
 | `dsh_cancel_session` | Cancel the active turn of a session without dropping its pending inbox. |
@@ -78,6 +79,19 @@ it did *not* return.
 Costs stay bounded by construction: `scan`, `limit`, `perSession` and `maxChars` are ceilings, not
 hints, and a cut message carries `truncated: true` with its real length rather than silently losing
 the tail.
+
+### Pending user decisions
+
+A turn can block on something the model never sees: an approval request (`approval/asked`, waiting for
+the one-shot permission decision) or an `ask_user_question` call. `dsh_list_requests` folds those
+audit events out of the session log — `{ sessionId }` for one session, or a scan of the newest sessions
+(running ones first) narrowed by `mine`/`owner` — and returns each request with its tool,
+reason, call id and seq. `includeSettled: true` also reports how earlier decisions resolved
+(`allowed-once`, `rejected`, `cancelled`, `unavailable`).
+
+Reads and waits surface the same state as a compact `pending` summary, so a `timedOut` wait no longer
+leaves the caller guessing. This is **reporting only**: approving or answering happens in the Harness GUI
+(or by whatever answerer the deployment composes), never through this endpoint.
 
 ### Caller identity and session ownership
 
@@ -296,12 +310,12 @@ private profile, with the token the server is configured with.
 
 ```bash
 node test/mcp-self-test.mjs            # 11 transport checks, no Harness needed
-node test/plugin-integration-test.mjs  # 55 checks: apply(), endpoint file, tools, transcript windows,
-                                       # outline/paging/truncation, search, index cursors, waiting,
-                                       # caller identity + restrictToOwner, archival tools, permissions,
-                                       # commands, model pinning, hot-reload ownership
+node test/plugin-integration-test.mjs  # 59 checks: apply(), endpoint file, tools, transcript windows,
+                                       # outline/paging/truncation, search, index cursors, pending user
+                                       # decisions, waiting, caller identity + restrictToOwner, archival
+                                       # tools, permissions, commands, model pinning, hot-reload ownership
 node test/stdio-bridge-test.mjs        # 4 checks, needs a RUNNING Harness (one real delegated turn)
-node test/live-e2e-test.mjs            # 39 checks over HTTP: protocol, resources, all fifteen tools,
+node test/live-e2e-test.mjs            # 40 checks over HTTP: protocol, resources, all sixteen tools,
                                        # archive/unarchive, permission presets, commands, error paths,
                                        # 4 real turns (needs a Harness)
 ```
