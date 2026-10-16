@@ -26,6 +26,7 @@ other harness ──MCP (Streamable HTTP or stdio)──> DSH MCP Server ──>
 | `dsh_run_command` | Run one slash command in a session and return its settled `{ kind, text, commandId }`. `line` takes a complete command line (`"/compact"`, `"/permission danger-full-access"`); `command` (+ optional `args`) takes a bare name. The command executes immediately without a model turn. |
 | `dsh_list_sessions` | A page of the session index: `sessionId`, title, running state, archival state, activity time, and the recorded owning agent (`view: "full"` adds cwd and liveness). Narrow server-side with `query` (title/cwd/owner/id), `mine: true` (or the `restrictToOwner` setting), `owner: "<id>"`, and `running`; page with `cursor`/`nextCursor`. Archived sessions are hidden unless `includeArchived: true`, mirroring the Web UI. |
 | `dsh_read_session` | A window of one session's transcript (user-authored and assistant messages only), plus the last durable `permissionPreset`. `mode: "tail"` (default, last 10) / `"head"` / `"outline"` (one compact row per message with a preview and length, no full text); `roles`, `afterSeq` + `window.nextAfterSeq` to page, `maxChars` (default 2000) to cap a single answer. Reports `totalMessages`, `matchedMessages` and `returned`, so the caller always knows what it has not read. `limit: 0` still means everything. Works while the session is archived. |
+| `dsh_answer_request` | Answer a parked decision, only when the deployment sets `answerUserRequests: true`: `decision: "allow"|"deny"` for an approval (a one-shot grant, or a denial) or `answers: [{ id, selected }]` for a question. Ids come from `dsh_list_requests`, which marks what this endpoint parked with `answerable: true`. The GUI stays in the race — whoever decides first wins — and an unanswered request still fails closed at `requestAnswerTimeoutMs`. |
 | `dsh_wait_session` | Block until the turn a session is already running ends, then return the assistant text it produced — for `wait: false` starts, GUI-driven sessions, or another caller's work. Never prompts, steers, or cancels: reaching `timeoutMs` returns `status: "timedOut"` with the turn still running, so call it again; `status: "idle"` returns immediately when nothing is running. |
 | `dsh_list_requests` | The user decisions a session — or the newest visible sessions, running first — is waiting on: approval requests (`approval/asked` with no matching `approval/decided`, the one-shot permission decision behind a sandbox escalation) and unanswered `ask_user_question` calls, with tool, reason, call id and seq. These audit events are invisible to the model, so this is how a caller learns *why* a delegated turn stopped progressing. Reporting only: the decision is granted in the Harness GUI. |
 | `dsh_search_sessions` | Find sessions by content server-side and get bounded snippets instead of transcripts: title/cwd/owner/id (`scope: "title"`) or the messages themselves (`"messages"`, `"both"` by default). Looks at the newest `scan` sessions the caller can see (default 20), reports `where`/`seq`/`snippet` per match, and then `dsh_read_session` reads just that session. |
@@ -90,8 +91,15 @@ reason, call id and seq. `includeSettled: true` also reports how earlier decisio
 (`allowed-once`, `rejected`, `cancelled`, `unavailable`).
 
 Reads and waits surface the same state as a compact `pending` summary, so a `timedOut` wait no longer
-leaves the caller guessing. This is **reporting only**: approving or answering happens in the Harness GUI
-(or by whatever answerer the deployment composes), never through this endpoint.
+leaves the caller guessing.
+
+By default this is **reporting only** — the decision is granted in the Harness GUI. With
+`answerUserRequests: true` the endpoint becomes one of the composed answerers: it parks the request
+and races it against every other answerer, so the GUI card still works and whoever decides first wins
+(the GUI, or `dsh_answer_request`). Only sessions an MCP caller created or adopted are parked unless
+`answerOwnedSessionsOnly: false`; an unanswered request fails closed at `requestAnswerTimeoutMs`.
+Both halves are Cordis waterfall listeners (`approval/request`, `user-questions/request`), and the
+scope filter admits an unscoped listener, which is how a Host plugin receives agent-scoped requests.
 
 ### Caller identity and session ownership
 
@@ -185,6 +193,9 @@ The bundle row in `cordis.patch.yml` accepts (all optional):
 | `defaultModel` | Harness default model | `{ provider, model, reasoningEffort? }` for **newly started** sessions without an explicit `model`. A continued session keeps the model it already runs. |
 | `turnTimeoutMs` | `1800000` | Default wait ceiling for a tool call that waits for a turn. Reaching it stops the wait, never the turn. |
 | `maxConcurrentTurns` | `8` | Concurrent waited turns before new calls queue. `dsh_wait_session` starts no turn and takes no slot. |
+| `answerUserRequests` | `false` | Become one of the deployment's answerers: park approvals and questions for sessions this endpoint drives so a caller can settle them with `dsh_answer_request`, racing the GUI (whoever decides first wins). |
+| `answerOwnedSessionsOnly` | `true` | With answering on, only sessions an MCP caller created or adopted are parked; the GUI keeps every other card. |
+| `requestAnswerTimeoutMs` | `600000` | How long a parked request waits for an MCP answer before it fails closed. |
 | `restrictToOwner` | `false` | Confine each caller to the sessions it created or adopted: other sessions are refused by id, and `dsh_list_sessions` returns only its own. |
 | `clientsFile` | `$DSH_HOME/mcp/dsh-mcp-clients.json` | Where the caller registry (agents seen + session owners) is kept, mode 0600. |
 | `clientsFlushMs` | `5000` | How long registry writes are coalesced before they hit disk. |
@@ -310,12 +321,13 @@ private profile, with the token the server is configured with.
 
 ```bash
 node test/mcp-self-test.mjs            # 11 transport checks, no Harness needed
-node test/plugin-integration-test.mjs  # 59 checks: apply(), endpoint file, tools, transcript windows,
+node test/plugin-integration-test.mjs  # 67 checks: apply(), endpoint file, tools, transcript windows,
                                        # outline/paging/truncation, search, index cursors, pending user
-                                       # decisions, waiting, caller identity + restrictToOwner, archival
-                                       # tools, permissions, commands, model pinning, hot-reload ownership
+                                       # decisions, parked approvals/questions answered over MCP, waiting,
+                                       # caller identity + restrictToOwner, archival tools, permissions,
+                                       # commands, model pinning, hot-reload ownership
 node test/stdio-bridge-test.mjs        # 4 checks, needs a RUNNING Harness (one real delegated turn)
-node test/live-e2e-test.mjs            # 40 checks over HTTP: protocol, resources, all sixteen tools,
+node test/live-e2e-test.mjs            # 41 checks over HTTP: protocol, resources, all seventeen tools,
                                        # archive/unarchive, permission presets, commands, error paths,
                                        # 4 real turns (needs a Harness)
 ```

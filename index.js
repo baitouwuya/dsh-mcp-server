@@ -23,7 +23,7 @@ import { createMcpHttpHandler } from './lib/http-route.js'
 import { McpGateway, SERVER_NAME } from './lib/protocol.js'
 
 /** Keep in sync with package.json; reported through `initialize`. */
-const VERSION = '0.5.0'
+const VERSION = '0.6.0'
 
 /** Cordis: wait for the Web carrier before registering the route. */
 export const inject = ['webServer']
@@ -99,6 +99,13 @@ export function apply(ctx, config = {}) {
   // Attribution is always on; `restrictToOwner` is the opt-in gate that turns it
   // into isolation between callers that share this endpoint's token.
   const restrictToOwner = config.restrictToOwner === true
+  // Answering a request is a permission decision, so this stays off unless the
+  // profile asks for it: with it on, the endpoint becomes one of the answerers.
+  const answerUserRequests = config.answerUserRequests === true
+  const answerOwnedSessionsOnly = config.answerOwnedSessionsOnly !== false
+  const requestAnswerTimeoutMs = Number.isFinite(Number(config.requestAnswerTimeoutMs))
+    ? Math.max(1000, Number(config.requestAnswerTimeoutMs))
+    : undefined
   const clientsFile = typeof config.clientsFile === 'string' && config.clientsFile
     ? resolve(config.clientsFile)
     : join(dshHome, 'mcp', 'dsh-mcp-clients.json')
@@ -155,6 +162,9 @@ export function apply(ctx, config = {}) {
     logger: log,
     sessionOwners: clients,
     restrictToOwner,
+    answerUserRequests,
+    answerOwnedSessionsOnly,
+    ...(requestAnswerTimeoutMs === undefined ? {} : { requestAnswerTimeoutMs }),
     defaultModel,
     defaultCwd: typeof config.defaultCwd === 'string' && config.defaultCwd ? resolve(config.defaultCwd) : undefined,
     turnTimeoutMs,
@@ -285,6 +295,7 @@ export function apply(ctx, config = {}) {
     tools: capabilities.tools.length,
     clients: clientsFile,
     restrictToOwner,
+    answerUserRequests,
     instance: instanceId,
   })
 }

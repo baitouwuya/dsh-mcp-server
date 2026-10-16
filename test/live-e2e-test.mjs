@@ -27,6 +27,7 @@ const EXPECTED_TOOLS = [
   'dsh_read_session',
   'dsh_search_sessions',
   'dsh_list_requests',
+  'dsh_answer_request',
   'dsh_wait_session',
   'dsh_whoami',
   'dsh_cancel_session',
@@ -208,6 +209,11 @@ assert.equal(typeof requests.count, 'number')
 assert.ok(Array.isArray(requests.sessions))
 assert.ok(typeof requests.note === 'string')
 oh('dsh_list_requests reports pending user decisions for a session')
+
+const answerRefused = (await rpc('tools/call', { name: 'dsh_answer_request', arguments: { requestId: 'none' } })).body
+assert.ok(answerRefused.result?.isError, 'answering must be off unless the deployment opts in')
+assert.match(answerRefused.result.content[0].text, /answerUserRequests/)
+oh('dsh_answer_request is refused until the deployment opts in')
 
 const repinned = await call('dsh_continue_session', {
   sessionId: run.sessionId,

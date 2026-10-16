@@ -22,11 +22,17 @@ const PROMPT = 'delegate this task'
 const REPLY = 'hello from dsh'
 
 /** Minimal fake Cordis context exposing only what the plugin touches. */
-function makeContext(services, disposers) {
+function makeContext(services, disposers, hooks = new Map()) {
   return {
     // Cordis exposes an injected service both as `ctx.<name>` and `ctx.get(name)`.
     ...services,
     get: (name) => services[name],
+    // Waterfall listeners registered by the plugin, so a test can play the Harness.
+    on: (name, handler) => {
+      hooks.set(name, handler)
+      return () => hooks.delete(name)
+    },
+    hooks,
     logger: () => ({ info() {}, warn() {}, debug() {}, error() {} }),
     effect: (create) => {
       const dispose = create()
@@ -401,7 +407,7 @@ try {
 
   const status = await call('dsh_status', {})
   assert.equal(status.defaultModel.model, 'deepseek-v4.1-flash-anthropic')
-  assert.equal(status.toolNames.length, 16)
+  assert.equal(status.toolNames.length, 17)
   assert.equal(status.defaultPermissionPreset, 'workspace-write')
   assert.deepEqual(status.permissionPresets.map((option) => option.value), ['read-only', 'workspace-write', 'danger-full-access'])
   checks.push('dsh_status reports the default model, tool names, and permission presets')
@@ -628,6 +634,118 @@ try {
   for (const dispose of strictDisposers) await dispose?.()
   await new Promise((resolve) => strictServer.close(resolve))
   await rm(strictDir, { recursive: true, force: true })
+
+  // --- answering pending decisions ---------------------------------------------
+  const answerRefused = await rpc({
+    jsonrpc: '2.0',
+    id: ++id,
+    method: 'tools/call',
+    params: { name: 'dsh_answer_request', arguments: { requestId: 'anything' } },
+  })
+  assert.ok(answerRefused.result?.isError, 'answering must be refused while the flag is off')
+  assert.match(answerRefused.result.content[0].text, /answerUserRequests/)
+  checks.push('dsh_answer_request refuses to answer unless the deployment opts in')
+
+  const responderDir = await mkdtemp(join(tmpdir(), 'dsh-mcp-responder-'))
+  const responder = makeServices()
+  const responderHooks = new Map()
+  const responderDisposers = []
+  apply(makeContext(responder.services, responderDisposers, responderHooks), {
+    token: 'responder-token',
+    endpointFile: join(responderDir, 'dsh-mcp-endpoint.json'),
+    url: 'http://127.0.0.1:9',
+    dshHome: responderDir,
+    answerUserRequests: true,
+    requestAnswerTimeoutMs: 60_000,
+  })
+  const responderServer = await new Promise((resolve) => {
+    const server = createServer((req, res) => { void responder.webServer.registered[0].handler(req, res) })
+    server.listen(0, '127.0.0.1', () => resolve(server))
+  })
+  const responderAddress = `http://127.0.0.1:${responderServer.address().port}/mcp`
+  const responderCall = async (name, args, headers) => {
+    const response = await fetch(responderAddress, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer responder-token', ...headers },
+      body: JSON.stringify({ jsonrpc: '2.0', id: ++id, method: 'tools/call', params: { name, arguments: args } }),
+    })
+    return JSON.parse(await response.text())
+  }
+  assert.equal(typeof responderHooks.get('approval/request'), 'function')
+  assert.equal(typeof responderHooks.get('user-questions/request'), 'function')
+  checks.push('an opted-in endpoint composes both Cordis waterfall answerers')
+
+  const owned = await responderCall('dsh_run_prompt', { prompt: PROMPT, cwd: '/tmp' }, { 'x-dsh-mcp-client': 'responder' })
+  const ownedSession = owned.result.structuredContent.sessionId
+  responder.seedEvents([
+    { type: 'approval/asked', data: { id: 'audit-1', toolName: 'bash', callId: 'call-park', reason: 'escalate sandbox' } },
+  ])
+
+  let delegated = false
+  const approvalNext = async () => { delegated = true; return 'unavailable' }
+  const pendingOutcome = responderHooks.get('approval/request')(
+    { agent: { session: { id: ownedSession } }, toolName: 'bash', callId: 'call-park', reason: 'escalate sandbox' },
+    approvalNext,
+  )
+  await new Promise((resolve) => setTimeout(resolve, 30))
+  const parkedListing = await responderCall('dsh_list_requests', { sessionId: ownedSession })
+  const parkedRow = parkedListing.result.structuredContent.sessions[0]?.pending?.approvals?.[0]
+  assert.equal(parkedRow.id, 'audit-1')
+  assert.equal(parkedRow.answerable, true)
+  assert.equal(delegated, true, 'the other answerers must still be asked')
+  checks.push('a parked approval is listed as answerable while the GUI answerer keeps its chance')
+
+  const allowed = await responderCall('dsh_answer_request', { requestId: 'audit-1', decision: 'allow' })
+  assert.equal(allowed.result.structuredContent.outcome, 'allowed-once')
+  assert.equal(await pendingOutcome, 'allowed-once')
+  checks.push('dsh_answer_request settles a parked approval with a one-shot grant')
+
+  const denied = responderHooks.get('approval/request')(
+    { agent: { session: { id: ownedSession } }, toolName: 'bash', callId: 'call-park-2' },
+    async () => 'unavailable',
+  )
+  const denyCall = await responderCall('dsh_answer_request', { requestId: 'call-park-2', decision: 'deny' })
+  assert.equal(denyCall.result.structuredContent.outcome, 'rejected')
+  assert.equal(await denied, 'rejected')
+  checks.push('a denied approval resolves as rejected')
+
+  const foreign = await responderHooks.get('approval/request')(
+    { agent: { session: { id: 'session-someone-else' } }, toolName: 'bash', callId: 'call-foreign' },
+    async () => 'unavailable',
+  )
+  assert.equal(await foreign, 'unavailable')
+  const foreignAnswer = await responderCall('dsh_answer_request', { requestId: 'call-foreign', decision: 'allow' })
+  assert.ok(foreignAnswer.result.isError, 'a session this endpoint does not drive is never parked')
+  checks.push('a request from a session this endpoint does not drive is delegated untouched')
+
+  const questionOutcome = responderHooks.get('user-questions/request')(
+    {
+      agent: { session: { id: ownedSession } },
+      questions: [{ id: 'q-ship', question: 'Ship it?', options: [{ label: 'yes' }, { label: 'no' }] }],
+      wait: { callId: 'call-q-live' },
+    },
+    async () => { throw new Error('no user-questions answerer accepted the request') },
+  )
+  await new Promise((resolve) => setTimeout(resolve, 30))
+  const badAnswers = await responderCall('dsh_answer_request', { requestId: 'call-q-live', answers: [] })
+  assert.ok(badAnswers.result.isError, 'a question needs an answer batch')
+  assert.match(badAnswers.result.content[0].text, /answers/)
+  const answered = await responderCall('dsh_answer_request', {
+    requestId: 'call-q-live',
+    answers: [{ id: 'q-ship', selected: ['yes'] }],
+  })
+  assert.deepEqual(answered.result.structuredContent.answers, [{ id: 'q-ship', selected: ['yes'] }])
+  assert.deepEqual(await questionOutcome, { answers: [{ id: 'q-ship', selected: ['yes'] }] })
+  checks.push('dsh_answer_request answers a parked question in service vocabulary')
+
+  const missing = await responderCall('dsh_answer_request', { requestId: 'audit-1', decision: 'allow' })
+  assert.ok(missing.result.isError, 'an already settled id cannot be answered twice')
+  assert.match(missing.result.content[0].text, /dsh_list_requests/)
+  checks.push('an id that is no longer parked fails with a diagnostic')
+
+  for (const dispose of responderDisposers) await dispose?.()
+  await new Promise((resolve) => responderServer.close(resolve))
+  await rm(responderDir, { recursive: true, force: true })
 
   // --- progressive disclosure -------------------------------------------------
   seedMessages([
