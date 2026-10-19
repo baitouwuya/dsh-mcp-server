@@ -11,7 +11,7 @@ import { createWorkSync } from '../lib/work-sync.js'
 const checks = []
 
 /** One engine, one fake Harness, one injectable clock. */
-function harness({ rows = [], enabled = true, cooldownMs = 300_000, waitMs = 120_000, maxPeers = 3 } = {}) {
+function harness({ rows = [], enabled = true, cooldownMs = 300_000, waitMs = 120_000, maxPeers = 3, steered = false } = {}) {
   const handlers = new Map()
   const delivered = []
   const logs = []
@@ -29,7 +29,9 @@ function harness({ rows = [], enabled = true, cooldownMs = 300_000, waitMs = 120
     listSessions: async () => rows,
     deliver: async (target, message) => {
       delivered.push({ target, text: message.text, meta: message.meta })
-      return true
+      // `steered` models the real path for a busy session: the message joins the
+      // running turn, so no turn of its own opens and no mark should be left.
+      return steered ? { accepted: true, startsTurn: false } : { accepted: true, startsTurn: true }
     },
     readAssistant: (event) => event?.data?.message?.content?.find?.((block) => block.type === 'text')?.text,
     now: () => clock,
@@ -142,6 +144,32 @@ await loop.turn('asker')
 await loop.settle()
 assert.equal(loop.delivered.length, 2, 'a disposed engine no longer listens')
 checks.push('status is lossless JSON and disposal stops the subscription')
+
+// --- a steered notice must not swallow the next real task start ---------------
+const steeredWorld = [
+  { sessionId: 'asker', running: true, cwd: '/work', updatedAt: 10 },
+  { sessionId: 'peer', running: true, cwd: '/work', updatedAt: 20 },
+  { sessionId: 'third', running: true, cwd: '/work', updatedAt: 30 },
+]
+const queued = harness({ rows: steeredWorld, maxPeers: 1 })
+await queued.turn('asker')
+await queued.settle()
+assert.equal(queued.delivered.length, 1, 'the newest peer is the one asked')
+const asked = queued.delivered[0].target
+assert.equal(asked, 'third')
+await queued.turn(asked)
+await queued.settle()
+assert.equal(queued.delivered.length, 1, 'a queued notice owns the turn it starts')
+
+const steeredRun = harness({ rows: steeredWorld, maxPeers: 1, steered: true })
+await steeredRun.turn('asker')
+await steeredRun.settle()
+assert.equal(steeredRun.delivered.length, 1)
+await steeredRun.turn(steeredRun.delivered[0].target)
+await steeredRun.settle()
+assert.equal(steeredRun.delivered.length, 2, 'a steered notice leaves the next task start to run its own round')
+assert.equal(steeredRun.delivered[1].target, 'peer', 'and that round asks the next-newest peer')
+checks.push('a steered notice does not swallow the next real task start')
 
 process.stdout.write('\n' + checks.length + ' work-sync checks passed\n')
 for (const check of checks) process.stdout.write('ok - ' + check + '\n')

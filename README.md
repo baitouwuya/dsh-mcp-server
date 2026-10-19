@@ -532,7 +532,7 @@ private profile, with the token the server is configured with.
 
 ```bash
 node test/mcp-self-test.mjs            # 11 transport checks, no Harness needed
-node test/work-sync-test.mjs           # 7 checks: the progress-sync engine against a fake Harness
+node test/work-sync-test.mjs           # 8 checks: the progress-sync engine against a fake Harness
 node test/client-half-test.mjs         # 11 checks: the browser half's row page, its settings, its route
 node test/plugin-integration-test.mjs  # 115 checks: apply(), endpoint file + advertised URL, tools,
                                        # transcript windows, outline/paging/truncation, search, index
