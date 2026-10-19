@@ -1235,6 +1235,30 @@ try {
   assert.match(String(unknownLookup && unknownLookup.message), /not a tool this DSH deployment publishes/)
   checks.push('the catalogue lists narrowly and returns one full schema on demand')
 
+  // The front door carries every published name and its call signature, which
+  // is what removes the discovery step: a session reads the tool it needs in
+  // the description instead of spending a step asking what exists.
+  const frontDoor = registeredTools().find((tool) => tool.name === 'dsh_mcp_tools')
+  for (const name of mcpNames) assert.ok(frontDoor.description.includes(name), `${name} is named in the front-door index`)
+  assert.match(frontDoor.description, /dsh_continue_session\(sessionId, prompt\)/, 'the index states the required arguments')
+  const frontDoorIndexCost = registeredTools()
+    .reduce((total, tool) => total + tool.description.length + JSON.stringify(tool.parameters).length, 0)
+  const fullTableCost = listed.result.tools
+    .reduce((total, tool) => total + tool.description.length + JSON.stringify(tool.inputSchema).length, 0)
+  assert.ok(frontDoorIndexCost < 3000, 'the index keeps the front door under 3 KB')
+  assert.ok(frontDoorIndexCost * 4 < fullTableCost, 'the front door stays a fraction of the full table')
+  checks.push(`the front door names all eighteen tools with their signatures (${frontDoorIndexCost} chars vs ${fullTableCost} for the table)`)
+
+  const bareName = await dispatch('whoami', {})
+  assert.ok(bareName && typeof bareName === 'object', 'a bare name resolves to the published tool')
+  const jsonArgs = await metaCall('dsh_mcp_call', { tool: 'whoami', arguments: '{}' })
+  assert.ok(jsonArgs && typeof jsonArgs === 'object', 'a JSON object string is accepted as arguments')
+  const nearMiss = await dispatch('read-session', { sessionId: currentId() }).then(() => undefined, (error) => error)
+  assert.match(String(nearMiss && nearMiss.message), /did you mean "dsh_read_session"/)
+  const nonsense = await dispatch('zzz', {}).then(() => undefined, (error) => error)
+  assert.match(String(nonsense && nonsense.message), /not a tool this DSH deployment publishes/)
+  checks.push('a bare or near-miss name resolves, or is refused with the close matches named')
+
   // Opening is per agent: the registrations land in the calling agent's own
   // scope, which is what makes DSH announce them as tool additions.
   const agent = makeAgent()
@@ -1266,7 +1290,9 @@ try {
   const widerRefusal = await refusedBy('dsh_run_prompt', { prompt: 'too wide', cwd: '/tmp', permissionPreset: 'danger-full-access' })
   assert.ok(widerRefusal, 'a preset wider than the caller must be refused')
   assert.match(String(widerRefusal.message), /wider than the calling DSH agent/)
+  assert.match(String(widerRefusal.message), /dsh_mcp_tools\(\{ name: "dsh_run_prompt" \}\)/, 'a refused call points at the schema that fixes it')
   checks.push('an internal caller cannot grant a preset wider than its own file policy')
+  checks.push('a refused dispatched call names the schema that would have been accepted')
 
   setCallerMode('danger-full-access')
   setCallerPreset('danger-full-access')

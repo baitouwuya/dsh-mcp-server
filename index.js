@@ -26,7 +26,7 @@ import { registerDshTools } from './lib/dsh-tools-bridge.js'
 import { groupOwnedSessions } from './lib/workspace-grouping.js'
 
 /** Keep in sync with package.json; reported through `initialize`. */
-const VERSION = '0.9.0'
+const VERSION = '0.10.0'
 
 /** This package's own name, as the profile's bundle row spells it. */
 const PACKAGE_NAME = (() => {

@@ -157,18 +157,33 @@ client config. On by default; set `exposeToDsh: false` to keep the plugin MCP-on
 
 ### On demand, not all at once
 
-Seventeen tool schemas are ~16.4 KB (~4k tokens) of permanent prompt cost in **every** session, whether
+Eighteen tool schemas are ~17.2 KB (~4.3k tokens) of permanent prompt cost in **every** session, whether
 that session ever delegates anything or not. So the default surface is a three-tool front door:
 
 | Front-door tool | Purpose |
 |---|---|
-| `dsh_mcp_tools` | The catalogue: one line per published tool, marked `native` when it is already callable. `name` returns that tool's complete parameter schema. |
+| `dsh_mcp_tools` | The catalogue — every published name **with its call signature** — plus one line per tool and `native` when it is already callable. `name` returns that tool's complete parameter schema. |
 | `dsh_mcp_open` | Register the named tools (**or `all: true`) into *this* session**, so they are callable natively from the next step on. |
 | `dsh_mcp_call` | Call one published tool directly, without opening it — for a single call that does not deserve a permanent schema. |
 
-That is ~1.9 KB (~470 tokens) at rest instead of ~16.4 KB, and the rest of the table is paid for only by
+That is ~2.8 KB (~700 tokens) at rest instead of ~17.2 KB, and the rest of the table is paid for only by
 sessions that actually use it. `dsh_status` reports the whole shape:
 `dshTools: { enabled, mode, registered, published, via }`.
+
+### Knowing without looking
+
+A front door that only says "there is a catalogue" costs the model a step: it calls `dsh_mcp_tools`
+before it can call anything, and pays that step again in every new session. So the front door states the
+catalogue itself — every published name with its required arguments, inside `dsh_mcp_tools`'s own
+description:
+
+> Publishes 18: dsh_run_prompt(prompt), dsh_continue_session(sessionId, prompt), dsh_list_commands(sessionId), …
+
+That index is ~600 characters (~150 tokens) and turns "send this to session X" into a single call:
+`dsh_mcp_call({ tool: "dsh_continue_session", arguments: { sessionId, prompt } })`. Names are forgiving:
+a bare `continue_session` resolves, a near miss is refused with the close matches named, `arguments`
+accepts a JSON object string, and a refused call ends by naming the `dsh_mcp_tools({ name })` lookup that
+fixes it. The index is the whole discovery budget — nothing else is paid until a tool is actually opened.
 
 ### Adding tools mid-session
 
@@ -357,7 +372,7 @@ The bundle row in `cordis.patch.yml` accepts (all optional):
 | `clientsFile` | `$DSH_HOME/mcp/dsh-mcp-clients.json` | Where the caller registry (agents seen + session owners) is kept, mode 0600. |
 | `clientsFlushMs` | `5000` | How long registry writes are coalesced before they hit disk. |
 | `exposeToDsh` | `true` | Expose the MCP tools to DSH itself. `false` keeps the endpoint MCP-only. |
-| `exposeToDshMode` | `lazy` | `lazy` registers the three-tool front door and lets a session open what it needs; `full` registers all eighteen at load (permanent schema cost). An unknown value fails at load. |
+| `exposeToDshMode` | `lazy` | `lazy` registers the three-tool front door, whose catalogue description already carries every published name and its required arguments, and lets a session open what it needs; `full` registers all eighteen at load (permanent schema cost). An unknown value fails at load. |
 | `exposeToDshPage` | `true` | Serve the loopback configuration route the Web Plugins page's switch reads and writes. |
 | `configPath` | `<path>-config` | Route path of that configuration endpoint (`/mcp-config` by default). |
 | `entryId` | `dsh-mcp-server` | Profile row the configuration page addresses when it saves the switch. |
@@ -486,8 +501,8 @@ private profile, with the token the server is configured with.
 
 ```bash
 node test/mcp-self-test.mjs            # 11 transport checks, no Harness needed
-node test/client-half-test.mjs         # 10 checks: the browser half's row page, its settings, its route
-node test/plugin-integration-test.mjs  # 108 checks: apply(), endpoint file + advertised URL, tools,
+node test/client-half-test.mjs         # 11 checks: the browser half's row page, its settings, its route
+node test/plugin-integration-test.mjs  # 111 checks: apply(), endpoint file + advertised URL, tools,
                                        # transcript windows, outline/paging/truncation, search, index
                                        # cursors, pending user decisions (PTC included), parked approvals
                                        # and questions answered over MCP, waiting, caller identity +
@@ -502,9 +517,8 @@ node test/live-e2e-test.mjs            # 46 checks over HTTP: protocol, resource
 ```
 
 The bridge's schema projection was verified against the Harness's **own** JSON-Schema validator
-(extracted from the app bundle): 11 of the 17 raw MCP schemas use keywords that validator rejects
-(`minLength`, `maximum`), and all 17 projected schemas — plus canonical values of every shape — are
-accepted.
+(extracted from the app bundle): 12 of the 18 raw MCP schemas use `minLength`, a keyword that validator
+rejects outright, and all 18 projected schemas — plus canonical values of every shape — are accepted.
 
 Live checks used during development also covered: a real MCP client exchange against the running
 Harness, an end-to-end `dsh_run_prompt` → `dsh_continue_session` → `dsh_read_session` flow, permission
