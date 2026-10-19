@@ -73,17 +73,25 @@ checks.push('the row page renders a summary string and the configuration panel')
 
 // --- the switch's read/write contract ----------------------------------------
 let written
+let command = null
 const handler = createConfigHandler({
   snapshot: () => ({
     package: '@local/dsh-mcp-server',
-    version: '0.8.0',
+    version: '0.9.0',
     exposeToDsh: written?.exposeToDsh ?? true,
     exposeToDshMode: written?.exposeToDshMode ?? 'lazy',
+    groupSessions: written?.groupSessions ?? true,
+    createGroups: written?.createGroups ?? false,
+    busyMode: written?.busyMode ?? 'setting',
+    busyEffective: 'steer',
     published: ['dsh_status'],
     registered: ['dsh_mcp_tools'],
     url: 'http://127.0.0.1:9/mcp',
+    command,
   }),
   write: async (patch) => { written = { ...(written ?? {}), ...patch } },
+  queueSession: async (sessionId) => { command = { kind: 'open-session', sessionId, at: Date.now() }; return true },
+  ackCommand: async () => { command = null },
 })
 const server = createServer((req, res) => { void handler(req, res) })
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
@@ -105,6 +113,17 @@ const modeWrite = await exported.writePatch({ exposeToDshMode: 'full' }, base)
 assert.equal(modeWrite.ok, true)
 assert.equal(written.exposeToDshMode, 'full', 'the mode patch reached the Host route')
 checks.push('the client half writes the surface mode through the same route')
+
+assert.equal(exported.pollMs, 1500, 'the watcher polls at the documented interval')
+
+const jump = await exported.writePatch({ openSession: 'session-abc' }, base)
+assert.equal(jump.ok, true)
+assert.equal(jump.command.sessionId, 'session-abc', 'the Host queues the GUI command')
+checks.push('the client half can ask the Host to open a session')
+
+const acknowledged = await exported.writePatch({ ackCommand: true }, base)
+assert.equal(acknowledged.command, null, 'the command is consumed once acknowledged')
+checks.push('an acknowledged GUI command is cleared')
 
 const reread = await exported.readSetting(base)
 assert.equal(reread.exposeToDsh, false, 'a later read sees the saved value')

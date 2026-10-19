@@ -40,7 +40,8 @@ other harness ──MCP (Streamable HTTP or stdio)──> DSH MCP Server ──>
 | `dsh_unarchive_session` | Drop a session from the archive set; it is listed again and returns to its recorded workspace position. |
 | `dsh_list_permission_presets` | The deployment's permission presets (each bundles a sandbox mode with an approval policy) plus the default for new sessions, for the `permissionPreset` argument above. |
 | `dsh_list_tools` | The tools DSH exposes to its own agents, for choosing what a delegated prompt can do; `query` narrows by name or description and `limit` caps the list. |
-| `dsh_status` | Endpoint, profile, version, session/live-agent counts, default model, active turns, the default permission preset, and the local tool surface (`dshTools`). |
+| `dsh_open_session` | Ask the running Web GUI to open one session and select it in the sidebar — for pointing the person at a session this endpoint started. Queued for the page that is open and consumed once; the session itself is untouched. |
+| `dsh_status` | Endpoint, profile, version, session/live-agent counts, default model, active turns, the default permission preset, the delivery policy, and the local tool surface (`dshTools`). |
 
 Archival needs the Host's `workspaceRegistry` service (`@deepseek-ai/dsh-workspace`). Without it the
 two archive tools report that the service is unavailable and listings simply omit the `archived`
@@ -266,6 +267,39 @@ hide a nested `undefined`: one unset field anywhere in a payload fails the whole
 `value is not lossless JSON`. The DSH-facing surface projects every result through
 `JSON.parse(JSON.stringify(...))` before returning it, so an unset field can only ever disappear.
 
+## Point the GUI at a session
+
+`dsh_open_session({ sessionId })` asks whichever Harness page is open to open that session and select it
+in the sidebar. It is the difference between telling someone a session id and showing them the session.
+
+DSH forwards only an **allowlist of Host events** to the browser, and that list is fixed when DSH is built,
+so a plugin cannot push a notification of its own. The page polls this plugin's loopback route instead:
+
+| Step | What happens |
+|---|---|
+| 1 | The tool (or `POST /mcp-config { "openSession": "<id>" }`) queues one command on the Host. |
+| 2 | The open page polls `GET /mcp-config` every 1.5 s while it is visible and reads `command`. |
+| 3 | It calls the client's own `uiWorkspace.openSession(id)` and then acknowledges with `{ "ackCommand": true }`. |
+
+A command that no page consumes expires after 60 s, so opening the GUI later never jumps unexpectedly. The
+tool refuses an id the Harness does not know, and it changes nothing about the session: no turn, no
+message, no state.
+
+## The plugin's own settings page
+
+The bundle's page on the Web **Plugins** page (row **Configure**) carries every switch this plugin has, so
+none of them needs a YAML edit:
+
+| Control | Writes |
+|---|---|
+| On/off | `exposeToDsh` |
+| Surface: on demand / all at once | `exposeToDshMode` |
+| Sidebar projects: join / may create | `groupSessions`, `createGroups` |
+| Delivery while busy: follow the setting / queue / steer | `busyMode` (with the value the setting currently resolves to) |
+
+Each control saves through the profile configuration editor and reloads this plugin's row, exactly as a
+hand edit would.
+
 ## Endpoint and authentication
 
 On activation the plugin registers `POST /mcp` on the Harness web server (default
@@ -323,7 +357,7 @@ The bundle row in `cordis.patch.yml` accepts (all optional):
 | `clientsFile` | `$DSH_HOME/mcp/dsh-mcp-clients.json` | Where the caller registry (agents seen + session owners) is kept, mode 0600. |
 | `clientsFlushMs` | `5000` | How long registry writes are coalesced before they hit disk. |
 | `exposeToDsh` | `true` | Expose the MCP tools to DSH itself. `false` keeps the endpoint MCP-only. |
-| `exposeToDshMode` | `lazy` | `lazy` registers the three-tool front door and lets a session open what it needs; `full` registers all seventeen at load (permanent schema cost). An unknown value fails at load. |
+| `exposeToDshMode` | `lazy` | `lazy` registers the three-tool front door and lets a session open what it needs; `full` registers all eighteen at load (permanent schema cost). An unknown value fails at load. |
 | `exposeToDshPage` | `true` | Serve the loopback configuration route the Web Plugins page's switch reads and writes. |
 | `configPath` | `<path>-config` | Route path of that configuration endpoint (`/mcp-config` by default). |
 | `entryId` | `dsh-mcp-server` | Profile row the configuration page addresses when it saves the switch. |
@@ -452,8 +486,8 @@ private profile, with the token the server is configured with.
 
 ```bash
 node test/mcp-self-test.mjs            # 11 transport checks, no Harness needed
-node test/client-half-test.mjs         # 8 checks: the browser half's row page and its read/write route
-node test/plugin-integration-test.mjs  # 105 checks: apply(), endpoint file + advertised URL, tools,
+node test/client-half-test.mjs         # 10 checks: the browser half's row page, its settings, its route
+node test/plugin-integration-test.mjs  # 108 checks: apply(), endpoint file + advertised URL, tools,
                                        # transcript windows, outline/paging/truncation, search, index
                                        # cursors, pending user decisions (PTC included), parked approvals
                                        # and questions answered over MCP, waiting, caller identity +
@@ -462,7 +496,7 @@ node test/plugin-integration-test.mjs  # 105 checks: apply(), endpoint file + ad
                                        # open, dispatch), its authority ceiling, the configuration route,
                                        # sidebar grouping, delivery mode, sender attribution, lossless values
 node test/stdio-bridge-test.mjs        # 4 checks, needs a RUNNING Harness (one real delegated turn)
-node test/live-e2e-test.mjs            # 46 checks over HTTP: protocol, resources, all seventeen tools,
+node test/live-e2e-test.mjs            # 47 checks over HTTP: protocol, resources, all eighteen tools,
                                        # archive/unarchive, permission presets, commands, error paths,
                                        # 4 real turns (needs a Harness)
 ```

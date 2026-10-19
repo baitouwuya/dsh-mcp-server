@@ -26,7 +26,7 @@ import { registerDshTools } from './lib/dsh-tools-bridge.js'
 import { groupOwnedSessions } from './lib/workspace-grouping.js'
 
 /** Keep in sync with package.json; reported through `initialize`. */
-const VERSION = '0.8.2'
+const VERSION = '0.9.0'
 
 /** This package's own name, as the profile's bundle row spells it. */
 const PACKAGE_NAME = (() => {
@@ -272,6 +272,7 @@ export function apply(ctx, config = {}) {
     groupSessions,
     createGroups,
     busyMode,
+    openSession: queueOpenSession,
   })
 
   dshToolsState.published = capabilities.tools.map((tool) => tool.name)
@@ -373,11 +374,54 @@ export function apply(ctx, config = {}) {
       busyMode,
       url: `${resolveBaseUrl()}${path}`,
       clientPage: clientPageState(),
+      // What "follow the setting" currently resolves to, so the page can show it.
+      busyEffective: (() => {
+        try {
+          return capabilities.effectiveDeliveryMode() ?? busyMode
+        } catch {
+          return busyMode
+        }
+      })(),
+      command: currentGuiCommand() ?? null,
     }
   }
 
   /**
-   * Remove project registrations this endpoint should not have made.
+   * How long a queued GUI command stays deliverable.
+   *
+   * A page polls this endpoint, so a command normally lands within a couple of
+   * seconds; an old one would surprise whoever opened the GUI later.
+   */
+  const guiCommandTtlMs = 60_000
+
+  /**
+   * The one pending request for the open Web page, or `undefined`.
+   *
+   * DSH forwards only an allowlisted set of Host events to the browser, and that
+   * list is fixed at DSH build time, so a plugin's own notification cannot ride
+   * it. The page polls this endpoint instead — the same loopback route the
+   * configuration page uses — which needs no DSH change and no websocket.
+   */
+  let guiCommand
+
+  /** The pending command, while it is still fresh. */
+  function currentGuiCommand() {
+    if (!guiCommand) return undefined
+    if (Date.now() - guiCommand.at > guiCommandTtlMs) {
+      guiCommand = undefined
+      return undefined
+    }
+    return { kind: guiCommand.kind, sessionId: guiCommand.sessionId, at: guiCommand.at }
+  }
+
+  /** Ask the open page to open one session. */
+  async function queueOpenSession(sessionId) {
+    guiCommand = { kind: 'open-session', sessionId, at: Date.now() }
+    log('debug', 'queued a GUI command', { sessionId })
+    return true
+  }
+
+  /** Remove project registrations this endpoint should not have made.
    *
    * A deliberate maintenance action, never something the plugin does on its own:
    * removing a registration deletes no folder, file, or Session — those Sessions
@@ -429,7 +473,14 @@ export function apply(ctx, config = {}) {
     ? ctx.webServer.register({
       kind: 'exact',
       path: configPath,
-      handler: createConfigHandler({ snapshot: configSnapshot, write: writeDshSurface, remove: removeDshGroups, logger: log }),
+      handler: createConfigHandler({
+        snapshot: configSnapshot,
+        write: writeDshSurface,
+        remove: removeDshGroups,
+        queueSession: queueOpenSession,
+        ackCommand: async () => { guiCommand = undefined },
+        logger: log,
+      }),
     })
     : undefined
 

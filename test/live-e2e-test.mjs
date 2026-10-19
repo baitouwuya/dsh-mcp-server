@@ -36,6 +36,7 @@ const EXPECTED_TOOLS = [
   'dsh_list_permission_presets',
   'dsh_list_tools',
   'dsh_status',
+  'dsh_open_session',
 ]
 
 async function post(message, { auth = true, token: override, timeoutMs = 300_000, headers = {} } = {}) {

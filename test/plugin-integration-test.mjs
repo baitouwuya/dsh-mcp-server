@@ -320,6 +320,9 @@ function makeServices() {
   const workspaceCalls = []
   const workspaceRegistry = {
     get archivedSessionIds() { return [...archived] },
+    async sessionKnown(id) {
+      return id === currentSessionId || id === 'session-cold'
+    },
     async resolveByPath(path) {
       workspaceCalls.push({ op: 'resolve', path })
       return workspaces.find((workspace) => workspace.path === path)
@@ -582,7 +585,7 @@ try {
 
   const status = await call('dsh_status', {})
   assert.equal(status.defaultModel.model, 'deepseek-v4.1-flash-anthropic')
-  assert.equal(status.toolNames.length, 17)
+  assert.equal(status.toolNames.length, 18)
   assert.equal(status.defaultPermissionPreset, 'workspace-write')
   assert.deepEqual(status.permissionPresets.map((option) => option.value), ['read-only', 'workspace-write', 'danger-full-access'])
   checks.push('dsh_status reports the default model, tool names, and permission presets')
@@ -1178,7 +1181,8 @@ try {
   // --- the DSH-facing tool surface ---------------------------------------------
   const listed = await rpc({ jsonrpc: '2.0', id: ++id, method: 'tools/list', params: {} })
   const mcpNames = listed.result.tools.map((tool) => tool.name).sort()
-  assert.equal(mcpNames.length, 17, 'the MCP endpoint publishes seventeen tools')
+  assert.equal(mcpNames.length, 18, 'the MCP endpoint publishes eighteen tools')
+  assert.ok(mcpNames.includes('dsh_open_session'), 'the GUI jump is part of the published table')
 
   // The default surface is the front door: three small schemas instead of
   // seventeen, so a session pays for the catalogue only when it needs it.
@@ -1194,7 +1198,7 @@ try {
   const localStatus = await call('dsh_status', {})
   assert.equal(localStatus.dshTools.enabled, true)
   assert.equal(localStatus.dshTools.mode, 'lazy')
-  assert.equal(localStatus.dshTools.published, 17, 'every published tool stays openable')
+  assert.equal(localStatus.dshTools.published, 18, 'every published tool stays openable')
   assert.deepEqual(localStatus.dshTools.registered.slice().sort(), ['dsh_mcp_call', 'dsh_mcp_open', 'dsh_mcp_tools'])
   assert.equal(localStatus.clientPage.available, true)
   assert.equal(localStatus.clientPage.inGraph, true)
@@ -1217,12 +1221,12 @@ try {
   }
 
   const catalogue = await metaCall('dsh_mcp_tools', {})
-  assert.equal(catalogue.total, 17)
-  assert.equal(catalogue.count, 17)
+  assert.equal(catalogue.total, 18)
+  assert.equal(catalogue.count, 18)
   assert.equal(catalogue.tools.every((row) => row.native === false), true, 'nothing is native until it is opened')
   assert.ok(catalogue.tools.every((row) => row.purpose.length > 0 && row.purpose.length < 200), 'a catalogue row stays one line')
   const searched = await metaCall('dsh_mcp_tools', { query: 'transcript' })
-  assert.ok(searched.count > 0 && searched.count < 17, 'a query narrows the catalogue')
+  assert.ok(searched.count > 0 && searched.count < 18, 'a query narrows the catalogue')
   const one = await metaCall('dsh_mcp_tools', { name: 'dsh_read_session' })
   assert.equal(one.name, 'dsh_read_session')
   assert.ok(one.parameters.properties.mode, 'a single lookup returns the parameter schema')
@@ -1397,7 +1401,7 @@ try {
   assert.equal(configRead.exposeToDsh, true)
   assert.equal(configRead.exposeToDshMode, 'lazy')
   assert.deepEqual([...configRead.registered].sort(), ['dsh_mcp_call', 'dsh_mcp_open', 'dsh_mcp_tools'])
-  assert.equal(configRead.published.length, 17)
+  assert.equal(configRead.published.length, 18)
   assert.equal(configRead.configPath, '/mcp-config')
   assert.equal(configRead.clientPage.inGraph, true)
   assert.equal(configRead.busyMode, 'setting')
@@ -1427,6 +1431,45 @@ try {
   assert.equal(configEdits().length, 2)
   assert.equal(configEdits()[1].next.exposeToDshMode, 'full')
   checks.push('the configuration route saves the surface mode')
+
+  const policyWrite = await (await fetch(configUrl, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ groupSessions: false, createGroups: true, busyMode: 'queue' }),
+  })).json()
+  assert.equal(policyWrite.ok, true)
+  assert.equal(policyWrite.groupSessions, false)
+  assert.equal(policyWrite.createGroups, true)
+  assert.equal(policyWrite.busyMode, 'queue')
+  assert.deepEqual(configEdits().at(-1).next, { groupSessions: false, createGroups: true, busyMode: 'queue' })
+  assert.equal(configRead.busyEffective, 'steer', 'the page can show what the setting resolves to')
+  checks.push('the configuration route saves the grouping and delivery policies the page offers')
+
+  const policyRefusals = await Promise.all([
+    fetch(configUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ groupSessions: 'yes' }) }),
+    fetch(configUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ busyMode: 'always' }) }),
+  ])
+  assert.deepEqual(policyRefusals.map((response) => response.status), [400, 400])
+  checks.push('the configuration route rejects a non-boolean grouping flag and an unknown delivery policy')
+
+  // --- the GUI jump -------------------------------------------------------------
+  // The Host cannot push to the page: DSH forwards only a build-time allowlist of
+  // events. A command waits on this route for whichever page is open.
+  const jump = await dispatch('dsh_open_session', { sessionId: currentId() })
+  assert.equal(jump.queued, true)
+  assert.equal(jump.sessionId, currentId())
+  const pending = await (await fetch(configUrl)).json()
+  assert.equal(pending.command.kind, 'open-session')
+  assert.equal(pending.command.sessionId, currentId())
+  const acknowledged = await (await fetch(configUrl, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ ackCommand: true }),
+  })).json()
+  assert.equal(acknowledged.command, null, 'an acknowledged command is consumed')
+  const unknownJump = await dispatch('dsh_open_session', { sessionId: 'session-nope' }).then(() => undefined, (error) => error)
+  assert.match(String(unknownJump && unknownJump.message), /Unknown session/)
+  checks.push('dsh_open_session queues a GUI command for the open page and refuses an unknown session')
 
   const configRefusal = await fetch(configUrl, {
     method: 'POST',
@@ -1503,7 +1546,7 @@ try {
   // The full surface is the opt-in: the whole table, projected for the registry.
   const fullTools = []
   apply(collectorContext(fullTools), { token: 'full-token', endpointFile: join(dir, 'full-endpoint.json'), url: 'http://127.0.0.1:9', dshHome: dir, exposeToDshMode: 'full' })
-  assert.equal(fullTools.length, 17, 'full mode registers the whole table')
+  assert.equal(fullTools.length, 18, 'full mode registers the whole table')
   assert.deepEqual(fullTools.map((tool) => tool.name).sort(), mcpNames)
   const runPromptTool = fullTools.find((tool) => tool.name === 'dsh_run_prompt')
   assert.equal(runPromptTool.parameters.properties.prompt.minLength, undefined, 'unsupported keywords must be dropped')
