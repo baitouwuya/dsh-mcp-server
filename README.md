@@ -299,9 +299,10 @@ agents working in the **same workspace** what they are doing and which files the
 - **The asker does not wait.** It keeps thinking. When the peer answers — its next assistant message — the
   text reaches the asker as a message labelled with the session that sent it, telling it to adjust its order
   and, if the work is duplicate or conflicting, to negotiate with that peer before continuing.
-- **A notice never begets a notice.** The turn a notice or report starts is recognised and skipped, one
-  question per pair at a time, and the same peer is not asked twice inside the cooldown. A peer that never
-  answers produces exactly one line, not a stream.
+- **The turn a notice starts is not mistaken for a task.** A delivery that joins a running turn opens none;
+  one that opens a turn is recognised for two minutes, so it is not answered with another round. One question
+  per pair at a time and the cooldown bound what is left, and a peer that never answers produces exactly one
+  line rather than a stream.
 
 On by default: a deployment running one agent at a time pays nothing, because no notice is ever sent when
 no peer is running. `syncOnStart: false` turns it off; the switch is on the Plugins page. The advanced knobs
@@ -532,7 +533,7 @@ private profile, with the token the server is configured with.
 
 ```bash
 node test/mcp-self-test.mjs            # 11 transport checks, no Harness needed
-node test/work-sync-test.mjs           # 8 checks: the progress-sync engine against a fake Harness
+node test/work-sync-test.mjs           # 12 checks: the progress-sync engine against a fake Harness
 node test/client-half-test.mjs         # 11 checks: the browser half's row page, its settings, its route
 node test/plugin-integration-test.mjs  # 115 checks: apply(), endpoint file + advertised URL, tools,
                                        # transcript windows, outline/paging/truncation, search, index

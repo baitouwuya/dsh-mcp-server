@@ -11,7 +11,7 @@ import { createWorkSync } from '../lib/work-sync.js'
 const checks = []
 
 /** One engine, one fake Harness, one injectable clock. */
-function harness({ rows = [], enabled = true, cooldownMs = 300_000, waitMs = 120_000, maxPeers = 3, steered = false } = {}) {
+function harness({ rows = [], enabled = true, cooldownMs = 300_000, waitMs = 120_000, maxPeers = 3, steered = false, defer = null } = {}) {
   const handlers = new Map()
   const delivered = []
   const logs = []
@@ -28,6 +28,7 @@ function harness({ rows = [], enabled = true, cooldownMs = 300_000, waitMs = 120
     logger: (level, message, detail) => logs.push({ level, message, detail }),
     listSessions: async () => rows,
     deliver: async (target, message) => {
+      if (defer) await defer.promise
       delivered.push({ target, text: message.text, meta: message.meta })
       // `steered` models the real path for a busy session: the message joins the
       // running turn, so no turn of its own opens and no mark should be left.
@@ -170,6 +171,58 @@ await steeredRun.settle()
 assert.equal(steeredRun.delivered.length, 2, 'a steered notice leaves the next task start to run its own round')
 assert.equal(steeredRun.delivered[1].target, 'peer', 'and that round asks the next-newest peer')
 checks.push('a steered notice does not swallow the next real task start')
+
+// --- the workspace rule is absolute ------------------------------------------
+const crossRoot = harness({
+  rows: [
+    { sessionId: 'a', running: true, cwd: '/work', updatedAt: 10 },
+    { sessionId: 'd', running: true, cwd: '/work', updatedAt: 20, parentSessionId: 'r' },
+    { sessionId: 'r', running: true, cwd: '/other', updatedAt: 30 },
+  ],
+})
+await crossRoot.turn('a')
+await crossRoot.settle()
+assert.deepEqual(ids(crossRoot.delivered), [], 'a root is judged by its own workspace, not by its sub-agent s')
+checks.push('a root in another workspace is never asked, even through its sub-agent')
+
+const idleRoot = harness({
+  rows: [
+    { sessionId: 'a', running: true, cwd: '/work', updatedAt: 10 },
+    { sessionId: 'r', running: false, cwd: '/work', updatedAt: 30 },
+    { sessionId: 'd', running: true, cwd: '/work', updatedAt: 40, parentSessionId: 'r' },
+  ],
+})
+await idleRoot.turn('a')
+await idleRoot.settle()
+assert.deepEqual(ids(idleRoot.delivered), [], 'a root that is not working is not asked')
+checks.push('a root that is not running is not asked')
+
+const unknownCwd = harness({
+  rows: [
+    { sessionId: 'a', running: true, cwd: '/work', updatedAt: 10 },
+    { sessionId: 'r', running: true, updatedAt: 30 },
+    { sessionId: 'c', running: true, cwd: '/work', updatedAt: 20, parentSessionId: 'r' },
+  ],
+})
+await unknownCwd.turn('c')
+await unknownCwd.settle()
+assert.deepEqual(ids(unknownCwd.delivered), [], 'an unrecorded workspace is not the same workspace')
+checks.push('a sub-agent asks its root only when both workspaces are recorded and equal')
+
+// --- a dispose in the middle of a delivery leaves nothing behind --------------
+const defer = { promise: undefined, release: undefined }
+defer.promise = new Promise((resolve) => { defer.release = resolve })
+const racing = harness({ rows: world, defer })
+const inFlight = racing.turn('asker')
+await new Promise((resolve) => setTimeout(resolve, 10))
+racing.sync.dispose()
+defer.release()
+await inFlight
+await racing.settle()
+const raced = racing.sync.status()
+assert.equal(raced.pending.length, 0, 'a disposed engine keeps no pending question')
+assert.equal(raced.peersAsked.length, 0, 'and records no question it did not complete')
+checks.push('a dispose during a delivery leaves no state and arms no timer')
 
 process.stdout.write('\n' + checks.length + ' work-sync checks passed\n')
 for (const check of checks) process.stdout.write('ok - ' + check + '\n')

@@ -27,7 +27,7 @@ import { createWorkSync } from './lib/work-sync.js'
 import { groupOwnedSessions } from './lib/workspace-grouping.js'
 
 /** Keep in sync with package.json; reported through `initialize`. */
-const VERSION = '0.11.1'
+const VERSION = '0.11.2'
 
 /** This package's own name, as the profile's bundle row spells it. */
 const PACKAGE_NAME = (() => {
