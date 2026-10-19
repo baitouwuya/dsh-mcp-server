@@ -214,6 +214,45 @@ An internal caller is attributed and clamped, never trusted:
 External MCP callers are unchanged — they present this endpoint's token, and the ceiling governs calls
 made from inside DSH. The Harness GUI remains an answerer in every race.
 
+## Sessions, projects, and message delivery
+
+### A session the endpoint starts joins its directory's project
+
+The Web sidebar groups Sessions by the Workspace registry's **recorded membership**
+(`workspace.sessionIds`), not by comparing directories while it renders, and the registry's one-time
+bootstrap only grouped the Sessions that already existed when it first ran. A Session created later by
+this endpoint therefore trailed in **Ungrouped** even when its directory was already a project.
+
+`dsh_run_prompt` now attaches the Session it just created to that directory's project — creating the
+project when the directory has none — and returns it as `workspace: { id, path, title, created, attached }`.
+A continuation joins the project its directory already has and never invents one. On activation the
+plugin also repairs the backlog once, in the background: every Session its own caller registry attributes
+to a caller, whose directory it recorded, is attached — which is what finally moves the Sessions created
+by earlier builds out of Ungrouped. Set `groupSessions: false` to keep automation out of the sidebar.
+
+### Queue or steer, following the deployment's own setting
+
+`dsh_continue_session` takes `mode: "queue" | "steer"`. Omitted, it follows this deployment's
+`ui-conversation.busyEnter` — the setting the Web composer's Enter key obeys — so sending into a busy
+session behaves the way the user's own input does. `busyMode` pins one behaviour for every call
+(`"queue"` or `"steer"`), and its `"setting"` default keeps following the live setting. The result
+echoes the mode that was actually used (`mode: "steer" | "queue"`).
+
+### A message from DSH names the session that sent it
+
+A prompt sent from inside DSH is delivered with a durable source —
+`{ kind: "dsh-mcp-server", sessionId: "<the sending session>", agentId }` — so the target Session's
+transcript says where the message came from instead of reading as the user typing, and the result
+carries `from: "<sending session>"`. External MCP callers keep the session controller's own `user`
+source: they are not DSH Sessions, so there is no session id to name.
+
+### Canonical results are lossless JSON
+
+The Harness validates a tool's canonical value, and an internal (PTC) call has no JSON round trip to
+hide a nested `undefined`: one unset field anywhere in a payload fails the whole call with
+`value is not lossless JSON`. The DSH-facing surface projects every result through
+`JSON.parse(JSON.stringify(...))` before returning it, so an unset field can only ever disappear.
+
 ## Endpoint and authentication
 
 On activation the plugin registers `POST /mcp` on the Harness web server (default
@@ -275,6 +314,8 @@ The bundle row in `cordis.patch.yml` accepts (all optional):
 | `exposeToDshPage` | `true` | Serve the loopback configuration route the Web Plugins page's switch reads and writes. |
 | `configPath` | `<path>-config` | Route path of that configuration endpoint (`/mcp-config` by default). |
 | `entryId` | `dsh-mcp-server` | Profile row the configuration page addresses when it saves the switch. |
+| `groupSessions` | `true` | Attach the Sessions this endpoint starts to their directory's project in the Web sidebar (creating it when missing), and repair the Sessions earlier builds left in "Ungrouped". |
+| `busyMode` | `setting` | Delivery to a session that is already running: `setting` follows the deployment's own `ui-conversation.busyEnter`, `queue` always waits for the next turn, `steer` always injects mid-turn. A caller's `mode` argument wins over all three. |
 | `maxBodyBytes` | `8388608` | Request body ceiling. |
 | `instructions` | built-in text | Replaces the instructions handed to the calling model. |
 
@@ -398,15 +439,16 @@ private profile, with the token the server is configured with.
 ```bash
 node test/mcp-self-test.mjs            # 11 transport checks, no Harness needed
 node test/client-half-test.mjs         # 8 checks: the browser half's row page and its read/write route
-node test/plugin-integration-test.mjs  # 90 checks: apply(), endpoint file + advertised URL, tools,
+node test/plugin-integration-test.mjs  # 103 checks: apply(), endpoint file + advertised URL, tools,
                                        # transcript windows, outline/paging/truncation, search, index
                                        # cursors, pending user decisions (PTC included), parked approvals
                                        # and questions answered over MCP, waiting, caller identity +
                                        # restrictToOwner, archival tools, permissions, commands, model
                                        # pinning, hot-reload ownership, the on-demand DSH surface (catalogue,
-                                       # open, dispatch), its authority ceiling, and the configuration route
+                                       # open, dispatch), its authority ceiling, the configuration route,
+                                       # sidebar grouping, delivery mode, sender attribution, lossless values
 node test/stdio-bridge-test.mjs        # 4 checks, needs a RUNNING Harness (one real delegated turn)
-node test/live-e2e-test.mjs            # 44 checks over HTTP: protocol, resources, all seventeen tools,
+node test/live-e2e-test.mjs            # 46 checks over HTTP: protocol, resources, all seventeen tools,
                                        # archive/unarchive, permission presets, commands, error paths,
                                        # 4 real turns (needs a Harness)
 ```
@@ -456,6 +498,9 @@ and the stdio bridge.
 - **Opened tools stay open for the session.** `dsh_mcp_open` registers into the calling agent's scope and
   nothing removes them before the agent is disposed, so a session that opens everything keeps paying for
   it. Open the few tools a task needs; use `dsh_mcp_call` for one-offs.
+- **Grouping is the sidebar's own membership record.** A Session's project is recorded, not derived
+  while rendering, so "it runs in that directory" is not enough — something has to attach it. This plugin
+  does that for the Sessions it starts and, once, for the ones it started before.
 - Sessions started over MCP are ordinary DSH sessions: they appear in the Harness session list and can
   be opened and continued in the GUI.
 

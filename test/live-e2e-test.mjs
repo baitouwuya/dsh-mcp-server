@@ -140,6 +140,12 @@ assert.equal(status.dshTools?.published, EXPECTED_TOOLS.length)
 assert.deepEqual([...status.dshTools.registered].sort(), ['dsh_mcp_call', 'dsh_mcp_open', 'dsh_mcp_tools'])
 oh('dsh_status reports the on-demand surface, its size, and its front door')
 
+// The sessions this endpoint starts must join their directory's project: the
+// sidebar groups by recorded membership, so nothing else can group them.
+assert.equal(status.busyMode?.configured, 'setting')
+assert.ok(status.busyMode?.effective === 'steer' || status.busyMode?.effective === 'queue')
+oh('dsh_status reports the delivery policy this deployment follows')
+
 const configUrl = `${url.replace(/\/mcp$/, '')}/mcp-config`
 const configResponse = await fetch(configUrl, { headers: { accept: 'application/json' } })
 assert.equal(configResponse.status, 200, `the configuration route must answer: ${configResponse.status}`)
@@ -196,6 +202,13 @@ assert.match(run.text, new RegExp(marker))
 assert.match(run.sessionId, /^session-/)
 assert.equal(run.permissionPreset, 'read-only')
 oh('dsh_run_prompt starts a session and returns the assistant final text')
+
+// The sessions this endpoint starts must join their directory's project: the
+// sidebar groups by recorded membership, so nothing else can group them.
+assert.ok(run.workspace, 'a session this endpoint starts must join a sidebar project')
+assert.equal(run.workspace.attached, true)
+assert.equal(run.workspace.path, '/tmp')
+oh('a session this endpoint starts is attached to its directory project')
 
 const digits = marker.split('-')[1]
 const continued = await call('dsh_continue_session', {

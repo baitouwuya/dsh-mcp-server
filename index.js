@@ -23,9 +23,10 @@ import { createConfigHandler } from './lib/config-route.js'
 import { createMcpHttpHandler } from './lib/http-route.js'
 import { McpGateway, SERVER_NAME } from './lib/protocol.js'
 import { registerDshTools } from './lib/dsh-tools-bridge.js'
+import { groupOwnedSessions } from './lib/workspace-grouping.js'
 
 /** Keep in sync with package.json; reported through `initialize`. */
-const VERSION = '0.8.0'
+const VERSION = '0.8.1'
 
 /** This package's own name, as the profile's bundle row spells it. */
 const PACKAGE_NAME = (() => {
@@ -141,6 +142,23 @@ export function apply(ctx, config = {}) {
     if (raw === 'lazy' || raw === 'full') return raw
     throw new Error(`dsh-mcp-server: "exposeToDshMode" must be "lazy" or "full" (got ${String(raw)}).`)
   })()
+  // Sessions this endpoint starts are attached to their directory's project in
+  // the Web sidebar; without that they trail in "Ungrouped" forever.
+  const groupSessions = config.groupSessions !== false
+  /**
+   * How a prompt is delivered to a session that is already running.
+   *
+   * `setting` (the default) follows this deployment's own `ui-conversation.busyEnter`,
+   * so "send this session a message" behaves like the user's Enter key; `queue`
+   * and `steer` pin one behaviour for every call. A caller's explicit `mode`
+   * argument always wins.
+   */
+  const busyMode = (() => {
+    const raw = config.busyMode
+    if (raw === undefined || raw === null || raw === '') return 'setting'
+    if (raw === 'setting' || raw === 'queue' || raw === 'steer') return raw
+    throw new Error(`dsh-mcp-server: "busyMode" must be "setting", "queue", or "steer" (got ${String(raw)}).`)
+  })()
   const entryId = typeof config.entryId === 'string' && config.entryId ? config.entryId : name
   const configPath = typeof config.configPath === 'string' && config.configPath
     ? resolvePath({ path: config.configPath })
@@ -243,6 +261,8 @@ export function apply(ctx, config = {}) {
     startedAt,
     dshTools,
     clientPage: clientPageState,
+    groupSessions,
+    busyMode,
   })
 
   dshToolsState.published = capabilities.tools.map((tool) => tool.name)
@@ -339,6 +359,8 @@ export function apply(ctx, config = {}) {
       configPath,
       published: dshToolsState.published,
       registered: dshToolsState.names,
+      groupSessions,
+      busyMode,
       url: `${resolveBaseUrl()}${path}`,
       clientPage: clientPageState(),
     }
@@ -445,6 +467,35 @@ export function apply(ctx, config = {}) {
   republishWhenListening()
 
   /**
+   * Repair the sessions an earlier build left in "Ungrouped".
+   *
+   * The sidebar groups by recorded project membership, so a session created
+   * before this build was fixed would stay ungrouped forever; one pass over the
+   * sessions this endpoint itself attributed to a caller puts them where they
+   * belong. It runs once, after the app is ready, and can never fail the plugin.
+   */
+  function repairGrouping() {
+    if (!groupSessions) return
+    const run = () => {
+      void groupOwnedSessions(ctx, clients, { logger: log })
+        .then((result) => {
+          if (result && (result.attached > 0 || result.created > 0)) {
+            log('info', 'regrouped sessions this endpoint had created', result)
+          }
+        })
+        .catch((error) => {
+          log('debug', 'grouping repair failed', { error: error instanceof Error ? error.message : String(error) })
+        })
+    }
+    // Deliberately a timer, not the launch signal: the repair is a background
+    // migration and must not compete with the readiness work the listener needs.
+    const timer = setTimeout(run, 5000)
+    timer.unref?.()
+  }
+
+  repairGrouping()
+
+  /**
    * Remove the published endpoint file, but only while this activation still owns
    * it, and do it synchronously so a hot-reload cannot interleave.
    *
@@ -493,6 +544,8 @@ export function apply(ctx, config = {}) {
     tools: capabilities.tools.length,
     exposeToDsh,
     exposeToDshMode,
+    groupSessions,
+    busyMode,
     dshTools: dshToolsState.names.length,
     clientPage: clientPageState(),
     configPath: exposeToDshPage ? configPath : undefined,

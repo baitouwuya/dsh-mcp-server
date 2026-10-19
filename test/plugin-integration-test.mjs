@@ -16,6 +16,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { createClientRegistry } from '../lib/clients.js'
+import { lossless } from '../lib/dsh-tools-bridge.js'
+import { groupOwnedSessions } from '../lib/workspace-grouping.js'
 import { apply } from '../index.js'
 
 const PROMPT = 'delegate this task'
@@ -97,7 +99,10 @@ function makeServices() {
   }
 
   /** The one live session the fake store hands back to the permission writer. */
-  const liveSession = { id: 'live-session', append() {} }
+  const liveSession = { id: 'live-session', header: { id: 'session-current', cwd: '/tmp' }, append() {} }
+
+  /** Messages an internal caller queued through the target agent's handle. */
+  const injectedMessages = []
 
   /** Permission presets mirroring the deployment's read-only/write/full table. */
   const permissionOptions = [
@@ -172,9 +177,44 @@ function makeServices() {
     },
   }
 
+  /** Admit one prompt the way the controller does, for both call paths. */
+  function admit(request) {
+    currentSessionId = request.sessionId
+    pendingPrompt = request.content.map((part) => part.text).join('')
+    events.push({
+      type: 'user/message',
+      seq: ++seq,
+      time: Date.now(),
+      data: { source: { kind: 'runtime-context' }, content: [{ type: 'text', text: 'INJECTED CONTEXT' }] },
+    })
+    events.push({
+      type: 'user/message',
+      seq: ++seq,
+      time: Date.now(),
+      data: { source: { kind: 'user' }, content: [{ type: 'text', text: pendingPrompt }] },
+    })
+    return { accepted: true }
+  }
+
+  /** The live agent handle a labelled prompt is queued on. */
+  function agentHandle(sessionId) {
+    return {
+      session: liveSession,
+      followup(message) {
+        injectedMessages.push({ sessionId, mode: 'queue', message })
+        admit({ sessionId, requestId: 'agent-followup', content: message.content })
+      },
+      steer(message) {
+        injectedMessages.push({ sessionId, mode: 'steer', message })
+        admit({ sessionId, requestId: 'agent-steer', content: message.content, mode: 'steer' })
+      },
+    }
+  }
+
   const sessionController = {
     async create(request) {
       currentSessionId = request.sessionId
+      liveSession.header = { id: request.sessionId, ...(request.cwd ? { cwd: request.cwd } : {}) }
       return { sessionId: currentSessionId }
     },
     async selectModel(request) {
@@ -183,24 +223,10 @@ function makeServices() {
     /** Cold-session resume path used when the store holds no live entry. */
     async resolveAgent(id) {
       resolvedAgents.push(id)
-      return { agent: { session: liveSession } }
+      return { agent: agentHandle(id) }
     },
     async prompt(request) {
-      currentSessionId = request.sessionId
-      pendingPrompt = request.content.map((part) => part.text).join('')
-      events.push({
-        type: 'user/message',
-        seq: ++seq,
-        time: Date.now(),
-        data: { source: { kind: 'runtime-context' }, content: [{ type: 'text', text: 'INJECTED CONTEXT' }] },
-      })
-      events.push({
-        type: 'user/message',
-        seq: ++seq,
-        time: Date.now(),
-        data: { source: { kind: 'user' }, content: [{ type: 'text', text: pendingPrompt }] },
-      })
-      return { accepted: true }
+      return admit(request)
     },
     follow(_request, signal) {
       if (hang) {
@@ -290,8 +316,30 @@ function makeServices() {
   /** Fake workspace registry: the archive set plus a busy flag for the refusal path. */
   const archived = new Set()
   let busy = false
+  const workspaces = []
+  const workspaceCalls = []
   const workspaceRegistry = {
     get archivedSessionIds() { return [...archived] },
+    async resolveByPath(path) {
+      workspaceCalls.push({ op: 'resolve', path })
+      return workspaces.find((workspace) => workspace.path === path)
+    },
+    async create(path) {
+      workspaceCalls.push({ op: 'create', path })
+      const existing = workspaces.find((workspace) => workspace.path === path)
+      if (existing) return existing
+      const workspace = {
+        id: `ws-${workspaces.length + 1}`,
+        path,
+        title: path.split('/').filter(Boolean).pop() ?? path,
+        sessionIds: [],
+        async attachSession(sessionId) {
+          if (!this.sessionIds.includes(sessionId)) this.sessionIds.unshift(sessionId)
+        },
+      }
+      workspaces.push(workspace)
+      return workspace
+    },
     async archiveSession(id, options) {
       if (!options?.stopActivity && busy) {
         const error = new Error(`Session "${id}" still has running work`)
@@ -310,7 +358,10 @@ function makeServices() {
 
   /** The profile configuration editor the settings page writes through. */
   const configEditor = {
-    entries: () => [{ options: { id: 'dsh-mcp-server', name: '@local/dsh-mcp-server' } }],
+    entries: () => [
+      { options: { id: 'ui-conversation', name: '@deepseek-ai/dsh-client-ui-conversation', config: { busyEnter: 'steer' } } },
+      { options: { id: 'dsh-mcp-server', name: '@local/dsh-mcp-server' } },
+    ],
     async edit(entry, change) {
       const next = change({}, {})
       configEdits.push({ entry, next })
@@ -407,6 +458,9 @@ function makeServices() {
     executedCommands: () => [...executedCommands],
     currentId: () => currentSessionId,
     registeredTools: () => [...registeredTools],
+    injectedMessages: () => [...injectedMessages],
+    workspaces: () => workspaces.map((workspace) => ({ id: workspace.id, path: workspace.path, title: workspace.title, sessionIds: [...workspace.sessionIds] })),
+    workspaceCalls: () => [...workspaceCalls],
     makeAgent,
     agentTools,
     configEdits: () => [...configEdits],
@@ -417,7 +471,7 @@ function makeServices() {
 
 const dir = await mkdtemp(join(tmpdir(), 'dsh-mcp-test-'))
 const endpointFile = join(dir, 'dsh-mcp-endpoint.json')
-const { services, webServer, getPrompt, setBusy, archivedIds, appliedPermissions, modelSelections, cancelledSessions, setRunning, setHang, seedMessages, seedEvents, addSyntheticSessions, resolvedAgents, listedCommandAgents, executedCommands, currentId, registeredTools, makeAgent, agentTools, configEdits, setCallerMode, setCallerPreset } = makeServices()
+const { services, webServer, getPrompt, setBusy, archivedIds, appliedPermissions, modelSelections, cancelledSessions, setRunning, setHang, seedMessages, seedEvents, addSyntheticSessions, resolvedAgents, listedCommandAgents, executedCommands, currentId, registeredTools, makeAgent, agentTools, configEdits, setCallerMode, setCallerPreset, injectedMessages, workspaces, workspaceCalls } = makeServices()
 let sessionIdFromRun
 const disposers = []
 const ctx = makeContext(services, disposers)
@@ -715,6 +769,8 @@ try {
   const strictDisposers = []
   apply(makeContext(strict.services, strictDisposers), {
     token: 'strict-token',
+    // Some deployments do not want their sidebar grown by automation.
+    groupSessions: false,
     endpointFile: join(strictDir, 'dsh-mcp-endpoint.json'),
     url: 'http://127.0.0.1:9',
     dshHome: strictDir,
@@ -747,6 +803,8 @@ try {
     [strictSession],
   )
   checks.push('restrictToOwner confines every caller to the sessions it created')
+  assert.equal(strict.workspaceCalls().length, 0, 'groupSessions: false leaves the sidebar alone')
+  checks.push('groupSessions: false keeps sessions out of the project sidebar')
   for (const dispose of strictDisposers) await dispose?.()
   await new Promise((resolve) => strictServer.close(resolve))
   await rm(strictDir, { recursive: true, force: true })
@@ -1220,6 +1278,96 @@ try {
   assert.match(String(nativeRefusal && nativeRefusal.message), /wider than the calling DSH agent/)
   checks.push('the ceiling applies to a natively opened tool exactly as to a dispatched one')
 
+  // --- lossless canonical values ------------------------------------------------
+  // The registry validates a tool's canonical value, and an internal (PTC) call
+  // has no JSON round trip to hide a nested `undefined`: this is the failure
+  // the bridge's projection defends against.
+  assert.deepEqual(lossless({ a: 1, b: undefined, c: [1, undefined, NaN] }), { a: 1, c: [1, null, null] })
+  assert.equal(lossless(undefined), '')
+  checks.push('the bridge projects canonical values into lossless JSON')
+
+  const isLossless = (value) => {
+    if (value === null || typeof value === 'string' || typeof value === 'boolean') return true
+    if (typeof value === 'number') return Number.isFinite(value)
+    if (Array.isArray(value)) return value.every((entry) => isLossless(entry))
+    if (typeof value !== 'object') return false
+    const prototype = Object.getPrototypeOf(value)
+    if (prototype !== Object.prototype && prototype !== null) return false
+    return Object.values(value).every((entry) => isLossless(entry))
+  }
+  for (const [name, args] of [
+    ['dsh_status', {}],
+    ['dsh_list_sessions', { limit: 5 }],
+    ['dsh_read_session', { sessionId: currentId(), limit: 2 }],
+    ['dsh_whoami', {}],
+  ]) {
+    const value = await dispatch(name, args)
+    assert.ok(isLossless(value), `${name} returned a value an internal call would reject`)
+  }
+  checks.push('every dispatched result is lossless JSON, so an internal call cannot fail on it')
+  assert.equal(Object.values(await dispatch('dsh_status', {})).includes(undefined), false)
+  checks.push('dsh_status carries no undefined field for an internal caller')
+
+  // --- workspace grouping -------------------------------------------------------
+  // The Web sidebar groups by the Workspace registry's recorded membership, so a
+  // session this endpoint starts must be attached or it stays in "Ungrouped".
+  const grouped = await dispatch('dsh_run_prompt', { prompt: 'group me', cwd: dir })
+  assert.equal(grouped.workspace.path, dir)
+  assert.equal(grouped.workspace.created, true, 'the directory had no project, so one is created')
+  assert.equal(grouped.workspace.attached, true)
+  assert.deepEqual(workspaces().find((workspace) => workspace.path === dir).sessionIds, [grouped.sessionId])
+  checks.push('a session this endpoint starts is attached to its directory project, created when missing')
+
+  const second = await dispatch('dsh_run_prompt', { prompt: 'same directory', cwd: dir })
+  assert.equal(second.workspace.created, false, 'the second session reuses the existing project')
+  assert.equal(workspaces().find((workspace) => workspace.path === dir).sessionIds.length, 2)
+  checks.push('a second session in the same directory reuses its project')
+
+  const joined = await dispatch('dsh_continue_session', { sessionId: grouped.sessionId, prompt: 'continue' })
+  assert.equal(joined.workspace.attached, true)
+  assert.equal(joined.workspace.created, false, 'a continuation never invents a project')
+  checks.push('a continuation joins the project its directory already has')
+
+  // The one-shot repair: sessions an earlier build created are still ungrouped,
+  // and only this endpoint's own registry knows which ones those are.
+  const legacyDir = await mkdtemp(join(tmpdir(), 'dsh-mcp-legacy-'))
+  const repair = await groupOwnedSessions({ get: () => services.workspaceRegistry }, {
+    ownedSessions: () => [{ sessionId: 'session-legacy', cwd: legacyDir }],
+  })
+  assert.equal(repair.considered, 1)
+  assert.equal(repair.created, 1, 'the repair creates the missing project')
+  assert.equal(repair.attached, 1)
+  assert.equal(workspaces().find((workspace) => workspace.path === legacyDir).sessionIds[0], 'session-legacy')
+  checks.push('the startup repair attaches sessions an earlier build left ungrouped')
+
+  // --- message delivery and sender attribution ----------------------------------
+  const steered = await dispatch('dsh_continue_session', { sessionId: currentId(), prompt: 'steer me', mode: 'steer' })
+  assert.equal(steered.mode, 'steer')
+  assert.equal(steered.from, 'live-session')
+  const steerRow = injectedMessages().at(-1)
+  assert.equal(steerRow.mode, 'steer', 'mode: "steer" reaches the agent as a steer')
+  assert.equal(steerRow.message.source.kind, 'dsh-mcp-server')
+  assert.equal(steerRow.message.source.sessionId, 'live-session', 'the message names the session that sent it')
+  checks.push('an internal prompt is delivered as a steer labelled with the sending session')
+
+  await dispatch('dsh_continue_session', { sessionId: currentId(), prompt: 'queue me', mode: 'queue' })
+  assert.equal(injectedMessages().at(-1).mode, 'queue', 'mode: "queue" waits for the next turn')
+  checks.push('mode: "queue" overrides the deployment setting')
+
+  const followed = await dispatch('dsh_continue_session', { sessionId: currentId(), prompt: 'follow the setting' })
+  assert.equal(followed.mode, 'steer', 'without mode the deployment busy-enter setting decides')
+  checks.push("without mode the delivery follows this deployment's own busy-Enter setting")
+
+  const externalContinue = await call('dsh_continue_session', { sessionId: currentId(), prompt: 'from an MCP client' })
+  assert.equal(externalContinue.mode, 'steer', 'the same policy governs an external caller')
+  assert.equal(injectedMessages().at(-1).message.content[0].text !== 'from an MCP client', true, 'an external caller keeps the controller path')
+  checks.push('an external MCP caller keeps the unlabelled controller path')
+
+  const statusWithPolicy = await call('dsh_status', {})
+  assert.equal(statusWithPolicy.busyMode.configured, 'setting')
+  assert.equal(statusWithPolicy.busyMode.effective, 'steer', 'the deployment setting is read live')
+  checks.push('dsh_status reports the delivery policy this deployment follows')
+
   // --- the configuration route the settings page drives -------------------------
   const configUrl = `http://127.0.0.1:${port.address().port}/mcp-config`
   const configRead = await (await fetch(configUrl)).json()
@@ -1229,7 +1377,9 @@ try {
   assert.equal(configRead.published.length, 17)
   assert.equal(configRead.configPath, '/mcp-config')
   assert.equal(configRead.clientPage.inGraph, true)
-  checks.push('the configuration route reports the surface and the client page')
+  assert.equal(configRead.busyMode, 'setting')
+  assert.equal(configRead.groupSessions, true)
+  checks.push('the configuration route reports the surface, the page, and the delivery policy')
 
   const configWrite = await (await fetch(configUrl, {
     method: 'POST',
