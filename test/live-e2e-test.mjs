@@ -210,10 +210,12 @@ assert.ok(Array.isArray(requests.sessions))
 assert.ok(typeof requests.note === 'string')
 oh('dsh_list_requests reports pending user decisions for a session')
 
-const answerRefused = (await rpc('tools/call', { name: 'dsh_answer_request', arguments: { requestId: 'none' } })).body
-assert.ok(answerRefused.result?.isError, 'answering must be off unless the deployment opts in')
-assert.match(answerRefused.result.content[0].text, /answerUserRequests/)
-oh('dsh_answer_request is refused until the deployment opts in')
+// Either rung is correct: answering off ("answerUserRequests"), or on with nothing parked
+// under that id ("No live request").
+const answerBogus = (await rpc('tools/call', { name: 'dsh_answer_request', arguments: { requestId: 'none' } })).body
+assert.ok(answerBogus.result?.isError, 'an id this endpoint never parked must fail')
+assert.match(answerBogus.result.content[0].text, /answerUserRequests|No live request/)
+oh('dsh_answer_request rejects an id it never parked')
 
 const repinned = await call('dsh_continue_session', {
   sessionId: run.sessionId,
