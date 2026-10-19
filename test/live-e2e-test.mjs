@@ -147,6 +147,13 @@ assert.equal(configBody.configPath, '/mcp-config')
 assert.ok(Array.isArray(configBody.tools) && configBody.tools.length === EXPECTED_TOOLS.length)
 oh('the configuration route serves the switch the Plugins page writes')
 
+// The browser half is what draws the row's Configure page, so the Host's own
+// module registry is the authoritative answer that it is being served.
+assert.equal(configBody.clientPage?.available, true, 'the Host composes browser modules')
+assert.equal(configBody.clientPage?.inGraph, true, 'this bundle is in the browser boot graph')
+assert.ok(String(configBody.clientPage?.bundle ?? '').includes('client.js'), `unexpected client bundle: ${configBody.clientPage?.bundle}`)
+oh('the browser half is composed into the served client graph')
+
 const who = await call('dsh_whoami')
 assert.equal(typeof who.client.id, 'string')
 assert.ok(['header', 'initialize', 'initialize-cache', 'user-agent', 'peer'].includes(who.client.source))

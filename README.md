@@ -164,6 +164,11 @@ like `bash` or `run_code`. On by default; set `exposeToDsh: false` to keep the p
 The registered names are the MCP names (`dsh_run_prompt`, `dsh_read_session`, …), so one vocabulary
 covers both surfaces, and `dsh_status` reports `dshTools: { enabled, count, via, names }`.
 
+Both `dsh_status` and `GET /mcp-config` also report `clientPage: { available, inGraph, bundle }` — the
+Host's browser module registry answering whether this bundle's page is really being served. It stays
+`inGraph: false` until a restart composes a newly added client half, which is the difference between
+"the page is missing" and "the page is not built yet".
+
 ### The authority ceiling
 
 An internal caller is attributed and clamped, never trusted:

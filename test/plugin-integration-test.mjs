@@ -318,6 +318,12 @@ function makeServices() {
     },
   }
 
+  /** The browser module registry: what serves this bundle's client half. */
+  const clientModules = {
+    clientPath: (id) => (id === '@local/dsh-mcp-server' ? '/tmp/pkg/lib/client.js' : undefined),
+    graph: () => ({ entries: [{ id: '@local/dsh-mcp-server' }, { id: '@deepseek-ai/dsh-client-ui-theme' }] }),
+  }
+
   /** The Harness tool registry: what the bridge registers into. */
   const tools = {
     schemas: () => [{ name: 'read_file', description: 'Read a file' }],
@@ -341,6 +347,7 @@ function makeServices() {
       workspaceRegistry,
       sandboxPolicy,
       configEditor,
+      clientModules,
       tools,
       agentDefaultModel: { currentSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-v4.1-flash-anthropic' }) },
     },
@@ -1089,7 +1096,10 @@ try {
   const localStatus = await call('dsh_status', {})
   assert.equal(localStatus.dshTools.enabled, true)
   assert.equal(localStatus.dshTools.count, 17)
-  checks.push('dsh_status reports the local tool surface and its size')
+  assert.equal(localStatus.clientPage.available, true)
+  assert.equal(localStatus.clientPage.inGraph, true)
+  assert.equal(localStatus.clientPage.bundle, '/tmp/pkg/lib/client.js')
+  checks.push('dsh_status reports the local tool surface, its size, and the served client page')
 
   const internalCall = (name, args) => {
     const definition = registeredTools().find((tool) => tool.name === name)
@@ -1137,7 +1147,8 @@ try {
   assert.equal(configRead.exposeToDsh, true)
   assert.equal(configRead.registered, 17)
   assert.equal(configRead.configPath, '/mcp-config')
-  checks.push('the configuration route reports the current switch')
+  assert.equal(configRead.clientPage.inGraph, true)
+  checks.push('the configuration route reports the current switch and the client page')
 
   const configWrite = await (await fetch(configUrl, {
     method: 'POST',

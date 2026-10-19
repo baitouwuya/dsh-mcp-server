@@ -228,6 +228,7 @@ export function apply(ctx, config = {}) {
     endpoint: endpointUrl,
     startedAt,
     dshTools,
+    clientPage: clientPageState,
   })
 
   // Register the same tool table into the local Harness, so a DSH agent calls
@@ -284,6 +285,32 @@ export function apply(ctx, config = {}) {
 
   const disposeRoute = ctx.webServer.register({ kind: 'exact', path, handler })
 
+  /**
+   * Whether the Web client half is being served for this package.
+   *
+   * The browser module graph is composed at boot, so a bundle that adds or
+   * changes its client half gets its Plugins-page configuration only after a
+   * restart; reporting the real state keeps a missing page diagnosable.
+   */
+  function clientPageState() {
+    const modules = ctx.get('clientModules')
+    if (typeof modules?.clientPath !== 'function') return { available: false }
+    let bundle
+    try {
+      bundle = modules.clientPath(PACKAGE_NAME)
+    } catch {
+      bundle = undefined
+    }
+    let inGraph = false
+    try {
+      const graph = modules.graph?.()
+      inGraph = Array.isArray(graph?.entries) && graph.entries.some((row) => row?.id === PACKAGE_NAME)
+    } catch {
+      inGraph = false
+    }
+    return { available: true, inGraph, ...(bundle ? { bundle } : {}) }
+  }
+
   /** What this plugin's own configuration page reads. */
   function configSnapshot() {
     return {
@@ -296,6 +323,7 @@ export function apply(ctx, config = {}) {
       tools: capabilities.tools.map((tool) => tool.name),
       registered: dshToolsState.names.length,
       url: `${resolveBaseUrl()}${path}`,
+      clientPage: clientPageState(),
     }
   }
 
@@ -448,6 +476,7 @@ export function apply(ctx, config = {}) {
     tools: capabilities.tools.length,
     exposeToDsh,
     dshTools: dshToolsState.names.length,
+    clientPage: clientPageState(),
     configPath: exposeToDshPage ? configPath : undefined,
     clients: clientsFile,
     restrictToOwner,
