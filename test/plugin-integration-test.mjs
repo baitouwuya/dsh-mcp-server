@@ -1273,6 +1273,8 @@ try {
   assert.match(String(stringOpen && stringOpen.message), /must be an array of published names/)
   const emptyOpen = await metaCall('dsh_mcp_open', { tools: [] }, makeAgent()).then(() => undefined, (error) => error)
   assert.match(String(emptyOpen && emptyOpen.message), /at least one published name/)
+  const openParam = registeredTools().find((tool) => tool.name === 'dsh_mcp_open').parameters.properties.tools.description
+  assert.match(openParam, /bare name/, 'the parameter text matches the refusal, not the old "omit opens everything" promise')
   const wholeSet = await metaCall('dsh_mcp_open', { all: true }, makeAgent())
   assert.equal(wholeSet.native.length, 18, 'all: true is still the way to the whole table')
   checks.push('the front-door refusal is reachable, and opening always needs an explicit target')
