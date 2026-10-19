@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-mcp-server",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "type": "module",
   "description": "Expose DeepSeek Harness sessions, agents, and tools to any other agent harness over the Model Context Protocol.",
   "license": "MIT",
@@ -29,6 +29,7 @@
   },
   "exports": {
     ".": "./index.js",
+    "./client": "./lib/client.js",
     "./package.json": "./package.json",
     "./locale/*.json": "./locale/*.json"
   },
@@ -36,7 +37,7 @@
     "dsh-mcp-stdio": "./bin/dsh-mcp-stdio.mjs"
   },
   "scripts": {
-    "test": "node test/mcp-self-test.mjs && node test/plugin-integration-test.mjs"
+    "test": "node test/mcp-self-test.mjs && node test/plugin-integration-test.mjs && node test/client-half-test.mjs"
   },
   "files": [
     "index.js",
@@ -50,6 +51,14 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-plugin-manager"
+      ]
     }
   },
   "engines": {

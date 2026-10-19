@@ -131,6 +131,22 @@ assert.equal(status.server, 'dsh-mcp-server')
 assert.deepEqual([...status.toolNames].sort(), [...EXPECTED_TOOLS].sort())
 oh('dsh_status reports the endpoint, counts, default model, and tool names')
 
+// The same table is registered into the local Harness — the surface the
+// Plugins page's switch controls — and the configuration route is what that
+// page reads and writes.
+assert.equal(status.dshTools?.enabled, true, 'the local tool surface is on by default')
+assert.equal(status.dshTools?.count, EXPECTED_TOOLS.length)
+oh('dsh_status reports the local tool surface and its size')
+
+const configUrl = `${url.replace(/\/mcp$/, '')}/mcp-config`
+const configResponse = await fetch(configUrl, { headers: { accept: 'application/json' } })
+assert.equal(configResponse.status, 200, `the configuration route must answer: ${configResponse.status}`)
+const configBody = await configResponse.json()
+assert.equal(configBody.exposeToDsh, true)
+assert.equal(configBody.configPath, '/mcp-config')
+assert.ok(Array.isArray(configBody.tools) && configBody.tools.length === EXPECTED_TOOLS.length)
+oh('the configuration route serves the switch the Plugins page writes')
+
 const who = await call('dsh_whoami')
 assert.equal(typeof who.client.id, 'string')
 assert.ok(['header', 'initialize', 'initialize-cache', 'user-agent', 'peer'].includes(who.client.source))

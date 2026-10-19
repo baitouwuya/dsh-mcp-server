@@ -21,9 +21,12 @@ import { apply } from '../index.js'
 const PROMPT = 'delegate this task'
 const REPLY = 'hello from dsh'
 
+/** The DSH agent a local tool call is attributed to. */
+const INTERNAL_AGENT = { id: 'agent-live', session: { header: { id: 'live-session' } } }
+
 /** Minimal fake Cordis context exposing only what the plugin touches. */
 function makeContext(services, disposers, hooks = new Map()) {
-  return {
+  const context = {
     // Cordis exposes an injected service both as `ctx.<name>` and `ctx.get(name)`.
     ...services,
     get: (name) => services[name],
@@ -39,7 +42,15 @@ function makeContext(services, disposers, hooks = new Map()) {
       disposers.push(dispose)
       return dispose
     },
+    // Cordis runs an injection callback once every named service resolves; a
+    // fake composes the same child scope so lifetime behaviour is exercised.
+    inject: (deps, callback) => {
+      if (!deps.every((dep) => services[dep] !== undefined)) return
+      const scope = { ...context, effect: context.effect }
+      callback(scope)
+    },
   }
+  return context
 }
 
 /** Fake DSH services with one scripted turn. */
@@ -94,8 +105,25 @@ function makeServices() {
     { value: 'workspace-write', name: 'Workspace write', description: 'Write inside the workspace; wider retries need approval.' },
     { value: 'danger-full-access', name: 'Full access', description: 'Full file access without approval prompts.' },
   ]
+  /** The knob bundle behind each preset name, as the real service's `resolve` returns it. */
+  const presetTable = {
+    'read-only': { sandbox: 'read-only', approval: 'never' },
+    'workspace-write': { sandbox: 'workspace-write', approval: 'ask' },
+    'danger-full-access': { sandbox: 'danger-full-access', approval: 'never' },
+  }
+  /** The calling agent's own authority, which the clamp is measured against. */
+  let callerMode = 'workspace-write'
+  let callerPreset = 'workspace-write'
+  const registeredTools = []
+  const configEdits = []
   const permissionPresets = {
     catalog: () => ({ defaultPreset: 'workspace-write', defaultOptions: permissionOptions, options: permissionOptions }),
+    resolve(name) {
+      const spec = presetTable[name]
+      if (!spec) throw new Error(`permission: unknown preset "${name}"`)
+      return { name, ...spec }
+    },
+    current: () => callerPreset,
     set(session, name) {
       if (!permissionOptions.some((option) => option.value === name)) {
         throw new Error(`permission: unknown preset "${name}" (known: ${permissionOptions.map((option) => option.value).join(', ')})`)
@@ -275,6 +303,33 @@ function makeServices() {
     async unarchiveSession(id) { archived.delete(id) },
   }
 
+  /** The per-call policy service the clamp reads the caller's own mode from. */
+  const sandboxPolicy = {
+    resolve: (request) => ({ mode: callerMode, workspaceRoot: '/tmp', sessionId: request?.session?.header?.id }),
+  }
+
+  /** The profile configuration editor the settings page writes through. */
+  const configEditor = {
+    entries: () => [{ options: { id: 'dsh-mcp-server', name: '@local/dsh-mcp-server' } }],
+    async edit(entry, change) {
+      const next = change({}, {})
+      configEdits.push({ entry, next })
+      return next
+    },
+  }
+
+  /** The Harness tool registry: what the bridge registers into. */
+  const tools = {
+    schemas: () => [{ name: 'read_file', description: 'Read a file' }],
+    register(definition) {
+      registeredTools.push(definition)
+      return () => {
+        const index = registeredTools.indexOf(definition)
+        if (index >= 0) registeredTools.splice(index, 1)
+      }
+    },
+  }
+
   return {
     services: {
       sessionController,
@@ -284,7 +339,9 @@ function makeServices() {
       commands,
       webServer,
       workspaceRegistry,
-      tools: { schemas: () => [{ name: 'read_file', description: 'Read a file' }] },
+      sandboxPolicy,
+      configEditor,
+      tools,
       agentDefaultModel: { currentSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-v4.1-flash-anthropic' }) },
     },
     webServer,
@@ -306,24 +363,38 @@ function makeServices() {
     listedCommandAgents: () => [...listedCommandAgents],
     executedCommands: () => [...executedCommands],
     currentId: () => currentSessionId,
+    registeredTools: () => [...registeredTools],
+    configEdits: () => [...configEdits],
+    setCallerMode: (mode) => { callerMode = mode },
+    setCallerPreset: (preset) => { callerPreset = preset },
   }
 }
 
 const dir = await mkdtemp(join(tmpdir(), 'dsh-mcp-test-'))
 const endpointFile = join(dir, 'dsh-mcp-endpoint.json')
-const { services, webServer, getPrompt, setBusy, archivedIds, appliedPermissions, modelSelections, cancelledSessions, setRunning, setHang, seedMessages, seedEvents, addSyntheticSessions, resolvedAgents, listedCommandAgents, executedCommands, currentId } = makeServices()
+const { services, webServer, getPrompt, setBusy, archivedIds, appliedPermissions, modelSelections, cancelledSessions, setRunning, setHang, seedMessages, seedEvents, addSyntheticSessions, resolvedAgents, listedCommandAgents, executedCommands, currentId, registeredTools, configEdits, setCallerMode, setCallerPreset } = makeServices()
 let sessionIdFromRun
 const disposers = []
 const ctx = makeContext(services, disposers)
 
 apply(ctx, { token: 'integration-token', endpointFile, url: 'http://127.0.0.1:9', dshHome: dir, clientsFlushMs: 20 })
 
-assert.equal(webServer.registered.length, 1, 'the plugin registers exactly one route')
-assert.equal(webServer.registered[0].kind, 'exact')
-assert.equal(webServer.registered[0].path, '/mcp')
+const mcpRoute = webServer.registered.find((entry) => entry.path === '/mcp')
+const configRoute = webServer.registered.find((entry) => entry.path === '/mcp-config')
+assert.equal(webServer.registered.length, 2, 'the plugin registers the MCP route and its configuration route')
+assert.equal(mcpRoute.kind, 'exact')
+assert.equal(configRoute.kind, 'exact')
 
 const port = await new Promise((resolve) => {
-  const server = createServer((req, res) => { void webServer.registered[0].handler(req, res) })
+  const server = createServer((req, res) => {
+    const route = webServer.registered.find((entry) => entry.path === (req.url ?? '/').split('?')[0])
+    if (!route) {
+      res.writeHead(404)
+      res.end()
+      return
+    }
+    void route.handler(req, res)
+  })
   server.listen(0, '127.0.0.1', () => resolve(server))
 })
 const address = `http://127.0.0.1:${port.address().port}/mcp`
@@ -718,6 +789,34 @@ try {
   assert.ok(foreignAnswer.result.isError, 'a session this endpoint does not drive is never parked')
   checks.push('a request from a session this endpoint does not drive is delegated untouched')
 
+  // An approval grants a sandbox strictly wider than the asking session's, so an
+  // internal caller below the widest rung could exceed its own authority by
+  // granting it; the local surface refuses that and leaves the GUI in the race.
+  const internalApproval = responderHooks.get('approval/request')(
+    { agent: { session: { id: ownedSession } }, toolName: 'bash', callId: 'call-internal-approval' },
+    async () => 'unavailable',
+  )
+  // Parking is awaited inside the answerer, so give it the microtask the other
+  // answerers get before the decision is asked for.
+  await new Promise((resolve) => setTimeout(resolve, 30))
+  const internalAnswer = (name, args) => {
+    const definition = responder.registeredTools().find((tool) => tool.name === name)
+    assert.ok(definition, `the bridge registered ${name}`)
+    return definition.execute(args, { agent: INTERNAL_AGENT })
+  }
+  responder.setCallerMode('workspace-write')
+  const refusedApproval = await internalAnswer('dsh_answer_request', { requestId: 'call-internal-approval', decision: 'allow' })
+    .then(() => undefined, (error) => error)
+  assert.ok(refusedApproval, 'an internal caller below the widest rung must not settle an approval')
+  assert.match(String(refusedApproval.message), /cannot settle an approval/)
+  // The refusal must leave the decision parked and unresolved: the same request
+  // still settles once the caller holds the widest rung, and only then.
+  responder.setCallerMode('danger-full-access')
+  const grantedApproval = await internalAnswer('dsh_answer_request', { requestId: 'call-internal-approval', decision: 'allow' })
+  assert.equal(grantedApproval.outcome, 'allowed-once')
+  assert.equal(await internalApproval, 'allowed-once')
+  checks.push('an internal caller settles an approval only when it already holds the widest mode')
+
   const questionOutcome = responderHooks.get('user-questions/request')(
     {
       agent: { session: { id: ownedSession } },
@@ -968,6 +1067,126 @@ try {
   assert.match(malformedCommand.result.content[0].text, /slash-command line/)
   checks.push('a line without a leading slash is rejected before execution')
 
+  // --- the DSH-facing tool surface ---------------------------------------------
+  const listed = await rpc({ jsonrpc: '2.0', id: ++id, method: 'tools/list', params: {} })
+  const mcpNames = listed.result.tools.map((tool) => tool.name).sort()
+  const localNames = registeredTools().map((tool) => tool.name).sort()
+  assert.equal(localNames.length, 17, 'every published tool is registered locally')
+  assert.deepEqual(localNames, mcpNames, 'the local surface carries exactly the published tools')
+  checks.push('every MCP tool is registered into the Harness tool registry under the same name')
+
+  const runPromptTool = registeredTools().find((tool) => tool.name === 'dsh_run_prompt')
+  assert.equal(runPromptTool.parameters.properties.prompt.minLength, undefined, 'unsupported keywords must be dropped')
+  assert.deepEqual(runPromptTool.parameters.properties.wait, { type: 'boolean', description: 'Wait for the turn to finish (default true).' })
+  assert.deepEqual(runPromptTool.parameters.required, ['prompt'])
+  assert.equal(runPromptTool.parameters.additionalProperties, false)
+  checks.push('the schema projection keeps the enforced keywords and drops the rest')
+
+  assert.equal(runPromptTool.output.render(undefined, { answer: 42 })[0].text, '{\n  "answer": 42\n}')
+  assert.equal(runPromptTool.output.render(undefined, 'plain')[0].text, 'plain')
+  checks.push('a registered tool renders its canonical value as model text')
+
+  const localStatus = await call('dsh_status', {})
+  assert.equal(localStatus.dshTools.enabled, true)
+  assert.equal(localStatus.dshTools.count, 17)
+  checks.push('dsh_status reports the local tool surface and its size')
+
+  const internalCall = (name, args) => {
+    const definition = registeredTools().find((tool) => tool.name === name)
+    assert.ok(definition, `the bridge registered ${name}`)
+    return definition.execute(args, { agent: INTERNAL_AGENT })
+  }
+  const refusedBy = async (name, args) => {
+    try {
+      await internalCall(name, args)
+      return undefined
+    } catch (error) {
+      return error
+    }
+  }
+
+  setCallerMode('workspace-write')
+  setCallerPreset('workspace-write')
+  const localRun = await internalCall('dsh_run_prompt', { prompt: 'internal delegation', cwd: '/tmp' })
+  assert.equal(localRun.status, 'completed')
+  assert.equal(localRun.permissionPreset, 'workspace-write', 'a started session is pinned to the caller preset')
+  assert.equal(localRun.owner.id, 'dsh-agent:live-session', 'an internal call is attributed to the calling session')
+  checks.push('an internal caller is attributed to its session and starts pinned to its own preset')
+
+  const widerRefusal = await refusedBy('dsh_run_prompt', { prompt: 'too wide', cwd: '/tmp', permissionPreset: 'danger-full-access' })
+  assert.ok(widerRefusal, 'a preset wider than the caller must be refused')
+  assert.match(String(widerRefusal.message), /wider than the calling DSH agent/)
+  checks.push('an internal caller cannot grant a preset wider than its own file policy')
+
+  setCallerMode('danger-full-access')
+  setCallerPreset('danger-full-access')
+  const narrowed = await internalCall('dsh_run_prompt', { prompt: 'narrower', cwd: '/tmp', permissionPreset: 'read-only' })
+  assert.equal(narrowed.permissionPreset, 'read-only', 'a narrower preset is not a privilege grant')
+  checks.push('an internal caller may still set a preset at or below its own rung')
+
+  setCallerMode('workspace-write')
+  setCallerPreset('workspace-write')
+  const commandRefusal = await refusedBy('dsh_run_command', { sessionId: currentId(), line: '/permission danger-full-access' })
+  assert.ok(commandRefusal, 'a slash command must respect the same ceiling')
+  assert.match(String(commandRefusal.message), /wider than the calling DSH agent/)
+  checks.push('a /permission slash command cannot bypass the internal ceiling')
+
+  // --- the configuration route the settings page drives -------------------------
+  const configUrl = `http://127.0.0.1:${port.address().port}/mcp-config`
+  const configRead = await (await fetch(configUrl)).json()
+  assert.equal(configRead.exposeToDsh, true)
+  assert.equal(configRead.registered, 17)
+  assert.equal(configRead.configPath, '/mcp-config')
+  checks.push('the configuration route reports the current switch')
+
+  const configWrite = await (await fetch(configUrl, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ exposeToDsh: false }),
+  })).json()
+  assert.equal(configWrite.ok, true)
+  assert.equal(configWrite.exposeToDsh, false)
+  assert.equal(configEdits().length, 1)
+  assert.equal(configEdits()[0].entry.options.id, 'dsh-mcp-server')
+  assert.equal(configEdits()[0].next.exposeToDsh, false)
+  checks.push('the configuration route saves the switch through the profile configuration editor')
+
+  const configRefusal = await fetch(configUrl, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ exposeToDsh: 'yes' }),
+  })
+  assert.equal(configRefusal.status, 400)
+  checks.push('the configuration route rejects a payload that is not a boolean')
+
+  const foreignResponse = {
+    statusCode: 0,
+    body: '',
+    writeHead(status) { this.statusCode = status },
+    end(body) { this.body = body ?? '' },
+  }
+  await configRoute.handler({ method: 'GET', socket: { remoteAddress: '10.0.0.7' } }, foreignResponse)
+  assert.equal(foreignResponse.statusCode, 403)
+  checks.push('the configuration route answers the local machine only')
+
+  const offTools = []
+  const offCtx = makeContext({
+    webServer: { register: () => () => {} },
+    tools: { register: (definition) => { offTools.push(definition); return () => {} } },
+  }, [])
+  apply(offCtx, { token: 'off-token', endpointFile: join(dir, 'off-endpoint.json'), url: 'http://127.0.0.1:9', dshHome: dir, exposeToDsh: false })
+  assert.equal(offTools.length, 0, 'the switch off keeps the surface MCP-only')
+  checks.push('exposeToDsh: false leaves the Harness tool registry untouched')
+
+  const onTools = []
+  const onCtx = makeContext({
+    webServer: { register: () => () => {} },
+    tools: { register: (definition) => { onTools.push(definition); return () => {} } },
+  }, [])
+  apply(onCtx, { token: 'on-token', endpointFile: join(dir, 'on-endpoint.json'), url: 'http://127.0.0.1:9', dshHome: dir })
+  assert.equal(onTools.length, 17, 'the surface is on by default')
+  checks.push('the local tool surface is on by default')
+
   const endpoint = JSON.parse(await readFile(endpointFile, 'utf8'))
   assert.equal(endpoint.token, 'integration-token')
   assert.equal(endpoint.url, 'http://127.0.0.1:9/mcp')
@@ -976,8 +1195,9 @@ try {
   checks.push('the published endpoint file carries the exact stdio bridge path')
 
   for (const dispose of disposers) await dispose?.()
-  assert.equal(webServer.registered.length, 0, 'disposal removes the route')
-  checks.push('disposal removes the route')
+  assert.equal(webServer.registered.length, 0, 'disposal removes the routes')
+  assert.equal(registeredTools().length, 0, 'disposal removes the local tools')
+  checks.push('disposal removes the routes and the locally registered tools')
 
   // A config hot-reload must not let the outgoing activation delete the endpoint
   // file the incoming one just wrote. Both reload orders are exercised because the

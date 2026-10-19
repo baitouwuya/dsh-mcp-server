@@ -19,11 +19,22 @@ import { dirname, join, resolve } from 'node:path'
 
 import { createDshCapabilities, DEFAULT_MAX_CONCURRENT_TURNS, DEFAULT_TURN_TIMEOUT_MS, INSTRUCTIONS } from './lib/dsh-capabilities.js'
 import { createClientRegistry, DEFAULT_CLIENT_FLUSH_MS, resolveCaller } from './lib/clients.js'
+import { createConfigHandler } from './lib/config-route.js'
 import { createMcpHttpHandler } from './lib/http-route.js'
 import { McpGateway, SERVER_NAME } from './lib/protocol.js'
+import { registerDshTools } from './lib/dsh-tools-bridge.js'
 
 /** Keep in sync with package.json; reported through `initialize`. */
-const VERSION = '0.6.1'
+const VERSION = '0.7.0'
+
+/** This package's own name, as the profile's bundle row spells it. */
+const PACKAGE_NAME = (() => {
+  try {
+    return JSON.parse(readFileSync(join(import.meta.dirname, 'package.json'), 'utf8')).name
+  } catch {
+    return '@local/dsh-mcp-server'
+  }
+})()
 
 /** Cordis: wait for the Web carrier before registering the route. */
 export const inject = ['webServer']
@@ -112,6 +123,15 @@ export function apply(ctx, config = {}) {
   const clientsFlushMs = Number.isFinite(Number(config.clientsFlushMs))
     ? Math.max(0, Number(config.clientsFlushMs))
     : DEFAULT_CLIENT_FLUSH_MS
+  // The local tool surface is on by default: the point of the plugin is that
+  // DSH itself can use what it publishes. Turn it off to keep the endpoint
+  // MCP-only (the settings page and this row both switch it).
+  const exposeToDsh = config.exposeToDsh !== false
+  const exposeToDshPage = config.exposeToDshPage !== false
+  const entryId = typeof config.entryId === 'string' && config.entryId ? config.entryId : name
+  const configPath = typeof config.configPath === 'string' && config.configPath
+    ? resolvePath({ path: config.configPath })
+    : `${path}-config`
 
   /** Who called, and which sessions each caller created; survives a restart. */
   const clients = createClientRegistry({ file: clientsFile, logger: log, flushMs: clientsFlushMs })
@@ -183,6 +203,15 @@ export function apply(ctx, config = {}) {
   const startedAt = Date.now()
   /** Identity of this activation; a dispose only removes the endpoint file this activation wrote. */
   const instanceId = randomUUID()
+  /** What the DSH-facing tool surface looks like right now, for `dsh_status` and the settings page. */
+  const dshToolsState = { names: [], via: undefined }
+  const dshTools = () => ({
+    enabled: exposeToDsh,
+    count: dshToolsState.names.length,
+    ...(dshToolsState.via ? { via: dshToolsState.via } : {}),
+    names: dshToolsState.names,
+  })
+
   const capabilities = createDshCapabilities(ctx, {
     logger: log,
     sessionOwners: clients,
@@ -198,7 +227,17 @@ export function apply(ctx, config = {}) {
     dshHome,
     endpoint: endpointUrl,
     startedAt,
+    dshTools,
   })
+
+  // Register the same tool table into the local Harness, so a DSH agent calls
+  // these directly; an internal caller is clamped to its own authority by
+  // `lib/dsh-capabilities.js`, never the endpoint's or the deployment's.
+  if (exposeToDsh) {
+    const registered = registerDshTools({ ctx, capabilities, logger: log })
+    dshToolsState.names = registered.names
+    dshToolsState.via = registered.via
+  }
 
   const gateway = new McpGateway({
     serverInfo: { name: SERVER_NAME, title: 'DeepSeek Harness MCP Server', version: VERSION },
@@ -244,6 +283,51 @@ export function apply(ctx, config = {}) {
   })
 
   const disposeRoute = ctx.webServer.register({ kind: 'exact', path, handler })
+
+  /** What this plugin's own configuration page reads. */
+  function configSnapshot() {
+    return {
+      package: PACKAGE_NAME,
+      version: VERSION,
+      entryId,
+      exposeToDsh,
+      mcpPath: path,
+      configPath,
+      tools: capabilities.tools.map((tool) => tool.name),
+      registered: dshToolsState.names.length,
+      url: `${resolveBaseUrl()}${path}`,
+    }
+  }
+
+  /**
+   * Save the switch through the Harness configuration editor, so the profile's
+   * `cordis.patch.yml` stays the one source of truth and the row reloads exactly
+   * as a hand edit would.
+   */
+  async function writeExposeToDsh(next) {
+    const editor = ctx.get('configEditor')
+    if (typeof editor?.entries !== 'function' || typeof editor.edit !== 'function') {
+      throw new Error('This Harness exposes no profile configuration editor, so the switch cannot be saved here. Set "exposeToDsh" on the dsh-mcp-server row in cordis.patch.yml and restart DSH.')
+    }
+    const rows = [...(editor.entries() ?? [])]
+    const entry = rows.find((row) => row?.options?.name === PACKAGE_NAME)
+      ?? rows.find((row) => row?.options?.id === entryId)
+      ?? rows.find((row) => row?.options?.id === name)
+    if (!entry) {
+      const seen = rows.map((row) => row?.options?.id).filter(Boolean).join(', ')
+      throw new Error(`The "${entryId}" row is not addressable in this profile's patch (saw: ${seen || 'no rows'}), so the switch cannot be saved here. Edit cordis.patch.yml directly.`)
+    }
+    await editor.edit(entry, (current) => ({ ...(current && typeof current === 'object' ? current : {}), exposeToDsh: next }))
+    return next
+  }
+
+  const disposeConfigRoute = exposeToDshPage
+    ? ctx.webServer.register({
+      kind: 'exact',
+      path: configPath,
+      handler: createConfigHandler({ snapshot: configSnapshot, write: writeExposeToDsh, logger: log }),
+    })
+    : undefined
 
   /** Publish connection details so stdio bridges and humans can find the endpoint. */
   async function publishEndpoint() {
@@ -347,6 +431,11 @@ export function apply(ctx, config = {}) {
     } catch (error) {
       log('debug', 'route disposal failed', { error: error instanceof Error ? error.message : String(error) })
     }
+    try {
+      disposeConfigRoute?.()
+    } catch (error) {
+      log('debug', 'configuration route disposal failed', { error: error instanceof Error ? error.message : String(error) })
+    }
     removeOwnEndpointFile()
     clients.flush()
     log('info', 'dsh-mcp-server stopped')
@@ -357,6 +446,9 @@ export function apply(ctx, config = {}) {
     path,
     auth: configuredToken ? 'configured bearer token' : 'generated bearer token',
     tools: capabilities.tools.length,
+    exposeToDsh,
+    dshTools: dshToolsState.names.length,
+    configPath: exposeToDshPage ? configPath : undefined,
     clients: clientsFile,
     restrictToOwner,
     answerUserRequests,

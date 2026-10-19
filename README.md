@@ -11,6 +11,10 @@ so it installs into a profile and survives Harness upgrades that keep the servic
 Every request is attributed to the calling agent and every session is recorded against its creator,
 so several harnesses can share one endpoint and still ask "which sessions are mine?".
 
+The same tool table is also registered into the local Harness, so a DSH agent calls these tools
+directly — switchable on this bundle's row in the Web **Plugins** page, and clamped to the calling
+session's own authority (see [DSH-local tools](#dsh-local-tools)).
+
 ```
 other harness ──MCP (Streamable HTTP or stdio)──> DSH MCP Server ──> DSH services
                                                                      sessionController / sessionQuery / tools
@@ -26,7 +30,7 @@ other harness ──MCP (Streamable HTTP or stdio)──> DSH MCP Server ──>
 | `dsh_run_command` | Run one slash command in a session and return its settled `{ kind, text, commandId }`. `line` takes a complete command line (`"/compact"`, `"/permission danger-full-access"`); `command` (+ optional `args`) takes a bare name. The command executes immediately without a model turn. |
 | `dsh_list_sessions` | A page of the session index: `sessionId`, title, running state, archival state, activity time, and the recorded owning agent (`view: "full"` adds cwd and liveness). Narrow server-side with `query` (title/cwd/owner/id), `mine: true` (or the `restrictToOwner` setting), `owner: "<id>"`, and `running`; page with `cursor`/`nextCursor`. Archived sessions are hidden unless `includeArchived: true`, mirroring the Web UI. |
 | `dsh_read_session` | A window of one session's transcript (user-authored and assistant messages only), plus the last durable `permissionPreset`. `mode: "tail"` (default, last 10) / `"head"` / `"outline"` (one compact row per message with a preview and length, no full text); `roles`, `afterSeq` + `window.nextAfterSeq` to page, `maxChars` (default 2000) to cap a single answer. Reports `totalMessages`, `matchedMessages` and `returned`, so the caller always knows what it has not read. `limit: 0` still means everything. Works while the session is archived. |
-| `dsh_answer_request` | Answer a parked decision, only when the deployment sets `answerUserRequests: true`: `decision: "allow"|"deny"` for an approval (a one-shot grant, or a denial) or `answers: [{ id, selected }]` for a question. Ids come from `dsh_list_requests`, which marks what this endpoint parked with `answerable: true`. The GUI stays in the race — whoever decides first wins — and an unanswered request still fails closed at `requestAnswerTimeoutMs`. |
+| `dsh_answer_request` | Answer a parked decision, only when the deployment sets `answerUserRequests: true`: `decision: "allow"|"deny"` for an approval (a one-shot grant, or a denial) or `answers: [{ id, selected }]` for a question. Ids come from `dsh_list_requests`, which marks what this endpoint parked with `answerable: true`. The GUI stays in the race — whoever decides first wins — and an unanswered request still fails closed at `requestAnswerTimeoutMs`. An internal DSH caller may only settle an **approval** while it already holds `danger-full-access`; questions are always answerable (see [DSH-local tools](#dsh-local-tools)). |
 | `dsh_wait_session` | Block until the turn a session is already running ends, then return the assistant text it produced — for `wait: false` starts, GUI-driven sessions, or another caller's work. Never prompts, steers, or cancels: reaching `timeoutMs` returns `status: "timedOut"` with the turn still running, so call it again; `status: "idle"` returns immediately when nothing is running. |
 | `dsh_list_requests` | The user decisions a session — or the newest visible sessions, running first — is waiting on: approval requests (`approval/asked` with no matching `approval/decided`, the one-shot permission decision behind a sandbox escalation) and unanswered `ask_user_question` calls, with tool, reason, call id and seq. These audit events are invisible to the model, so this is how a caller learns *why* a delegated turn stopped progressing. Reporting only: the decision is granted in the Harness GUI. |
 | `dsh_search_sessions` | Find sessions by content server-side and get bounded snippets instead of transcripts: title/cwd/owner/id (`scope: "title"`) or the messages themselves (`"messages"`, `"both"` by default). Looks at the newest `scan` sessions the caller can see (default 20), reports `where`/`seq`/`snippet` per match, and then `dsh_read_session` reads just that session. |
@@ -36,7 +40,7 @@ other harness ──MCP (Streamable HTTP or stdio)──> DSH MCP Server ──>
 | `dsh_unarchive_session` | Drop a session from the archive set; it is listed again and returns to its recorded workspace position. |
 | `dsh_list_permission_presets` | The deployment's permission presets (each bundles a sandbox mode with an approval policy) plus the default for new sessions, for the `permissionPreset` argument above. |
 | `dsh_list_tools` | The tools DSH exposes to its own agents, for choosing what a delegated prompt can do; `query` narrows by name or description and `limit` caps the list. |
-| `dsh_status` | Endpoint, profile, version, session/live-agent counts, default model, active turns, and the default permission preset. |
+| `dsh_status` | Endpoint, profile, version, session/live-agent counts, default model, active turns, the default permission preset, and the local tool surface (`dshTools`). |
 
 Archival needs the Host's `workspaceRegistry` service (`@deepseek-ai/dsh-workspace`). Without it the
 two archive tools report that the service is unavailable and listings simply omit the `archived`
@@ -145,6 +149,43 @@ No wait path cancels or steers the session: a reached ceiling and a disconnected
 waiting. A client with its own call timeout can therefore set `timeoutMs` below it and re-wait instead
 of polling `dsh_read_session` in a loop. Only `dsh_cancel_session` stops a turn.
 
+## DSH-local tools
+
+The endpoint's tools are **also** registered into the running Harness's own tool registry
+(`ctx.tools`), so a DSH agent calls them directly: no second process, no MCP client config, exactly
+like `bash` or `run_code`. On by default; set `exposeToDsh: false` to keep the plugin MCP-only.
+
+| Where | What |
+|---|---|
+| Web **Plugins** page → this bundle's row → **Configure** | The switch. It saves through the profile configuration editor, so it lands in `cordis.patch.yml` exactly like a hand edit, and the row reloads. |
+| `GET /mcp-config` (loopback only) | The current state: `exposeToDsh`, the MCP URL, the tool list, the version. |
+| `POST /mcp-config` `{ "exposeToDsh": false }` | The same write the page performs. |
+
+The registered names are the MCP names (`dsh_run_prompt`, `dsh_read_session`, …), so one vocabulary
+covers both surfaces, and `dsh_status` reports `dshTools: { enabled, count, via, names }`.
+
+### The authority ceiling
+
+An internal caller is attributed and clamped, never trusted:
+
+- **Attribution.** A local call is recorded against `dsh-agent:<sessionId>` — the session that made it,
+  not the endpoint — so `dsh_whoami`, `mine: true`, `restrictToOwner` and `answerOwnedSessionsOnly`
+  apply to it exactly as they do to an MCP caller.
+- **A preset may not exceed the caller's own file policy.** `permissionPreset` on
+  `dsh_run_prompt`/`dsh_continue_session`, and `/permission <preset>` on `dsh_run_command`, are
+  refused when the preset's sandbox is wider than the caller's current mode
+  (`read-only` < `workspace-write` < `danger-full-access`). Narrower or equal presets are allowed.
+- **A session an internal caller starts is pinned to its own rung.** With no explicit preset the new
+  session gets the caller's own preset, or the widest configured preset at the caller's mode — never
+  the deployment default, which could be wider than the caller.
+- **An approval needs the widest rung.** Settling an approval grants the asking session a sandbox
+  strictly wider than its own, so an internal caller may only answer one while it already holds
+  `danger-full-access`; anything else stays with the Harness GUI. Questions carry no privilege and
+  are always answerable.
+
+External MCP callers are unchanged — they present this endpoint's token, and the ceiling governs calls
+made from inside DSH. The Harness GUI remains an answerer in every race.
+
 ## Endpoint and authentication
 
 On activation the plugin registers `POST /mcp` on the Harness web server (default
@@ -201,6 +242,10 @@ The bundle row in `cordis.patch.yml` accepts (all optional):
 | `restrictToOwner` | `false` | Confine each caller to the sessions it created or adopted: other sessions are refused by id, and `dsh_list_sessions` returns only its own. |
 | `clientsFile` | `$DSH_HOME/mcp/dsh-mcp-clients.json` | Where the caller registry (agents seen + session owners) is kept, mode 0600. |
 | `clientsFlushMs` | `5000` | How long registry writes are coalesced before they hit disk. |
+| `exposeToDsh` | `true` | Register the MCP tools into the local Harness tool registry so a DSH agent calls them directly. `false` keeps the endpoint MCP-only. |
+| `exposeToDshPage` | `true` | Serve the loopback configuration route the Web Plugins page's switch reads and writes. |
+| `configPath` | `<path>-config` | Route path of that configuration endpoint (`/mcp-config` by default). |
+| `entryId` | `dsh-mcp-server` | Profile row the configuration page addresses when it saves the switch. |
 | `maxBodyBytes` | `8388608` | Request body ceiling. |
 | `instructions` | built-in text | Replaces the instructions handed to the calling model. |
 
@@ -323,17 +368,24 @@ private profile, with the token the server is configured with.
 
 ```bash
 node test/mcp-self-test.mjs            # 11 transport checks, no Harness needed
-node test/plugin-integration-test.mjs  # 70 checks: apply(), endpoint file + advertised URL, tools,
+node test/client-half-test.mjs         # 7 checks: the browser half's row page and its read/write route
+node test/plugin-integration-test.mjs  # 85 checks: apply(), endpoint file + advertised URL, tools,
                                        # transcript windows, outline/paging/truncation, search, index
                                        # cursors, pending user decisions (PTC included), parked approvals
                                        # and questions answered over MCP, waiting, caller identity +
                                        # restrictToOwner, archival tools, permissions, commands, model
-                                       # pinning, hot-reload ownership
+                                       # pinning, hot-reload ownership, the DSH-facing tool surface, its
+                                       # authority ceiling, and the configuration route
 node test/stdio-bridge-test.mjs        # 4 checks, needs a RUNNING Harness (one real delegated turn)
-node test/live-e2e-test.mjs            # 41 checks over HTTP: protocol, resources, all seventeen tools,
+node test/live-e2e-test.mjs            # 43 checks over HTTP: protocol, resources, all seventeen tools,
                                        # archive/unarchive, permission presets, commands, error paths,
                                        # 4 real turns (needs a Harness)
 ```
+
+The bridge's schema projection was verified against the Harness's **own** JSON-Schema validator
+(extracted from the app bundle): 11 of the 17 raw MCP schemas use keywords that validator rejects
+(`minLength`, `maximum`), and all 17 projected schemas — plus canonical values of every shape — are
+accepted.
 
 Live checks used during development also covered: a real MCP client exchange against the running
 Harness, an end-to-end `dsh_run_prompt` → `dsh_continue_session` → `dsh_read_session` flow, permission
@@ -367,6 +419,11 @@ and the stdio bridge.
   another session. It is not queued behind a running turn and it can mutate session state
   (`/permission`), so it carries the same authority as typing the command in the GUI; `dsh_list_commands`
   first is the way to know what a session accepts.
+- **The local surface needs the Harness tool registry.** `ctx.tools` (`@deepseek-ai/dsh-tools`) is
+  composed in every shipped profile; without it the tools simply stay MCP-only and the log says so.
+- **Adding the browser half needs a restart.** The Host half's tools land when the row reloads, but
+  the Web client graph is composed at boot, so a new `lib/client.js` or `dsh.client` declaration shows
+  its **Configure** page only after restarting DSH.
 - Sessions started over MCP are ordinary DSH sessions: they appear in the Harness session list and can
   be opened and continued in the GUI.
 
