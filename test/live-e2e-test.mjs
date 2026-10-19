@@ -203,12 +203,15 @@ assert.match(run.sessionId, /^session-/)
 assert.equal(run.permissionPreset, 'read-only')
 oh('dsh_run_prompt starts a session and returns the assistant final text')
 
-// The sessions this endpoint starts must join their directory's project: the
-// sidebar groups by recorded membership, so nothing else can group them.
-assert.ok(run.workspace, 'a session this endpoint starts must join a sidebar project')
-assert.equal(run.workspace.attached, true)
-assert.equal(run.workspace.path, '/tmp')
-oh('a session this endpoint starts is attached to its directory project')
+// Grouping is attach-only: a session joins a project that already exists and is
+// never handed an invented one, so a fresh directory keeps it in Ungrouped.
+if (run.workspace) {
+  assert.equal(run.workspace.attached, true)
+  assert.equal(run.workspace.created, false, 'a project is never invented')
+}
+assert.equal(status.grouping?.attach, true)
+assert.equal(status.grouping?.create, false, 'inventing a project is off by default')
+oh('a session joins an existing project only, and never invents one')
 
 const digits = marker.split('-')[1]
 const continued = await call('dsh_continue_session', {

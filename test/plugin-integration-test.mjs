@@ -324,6 +324,11 @@ function makeServices() {
       workspaceCalls.push({ op: 'resolve', path })
       return workspaces.find((workspace) => workspace.path === path)
     },
+    async delete(id) {
+      workspaceCalls.push({ op: 'delete', id })
+      const index = workspaces.findIndex((workspace) => workspace.id === id)
+      if (index >= 0) workspaces.splice(index, 1)
+    },
     async create(path) {
       workspaceCalls.push({ op: 'create', path })
       const existing = workspaces.find((workspace) => workspace.path === path)
@@ -1309,19 +1314,27 @@ try {
   checks.push('dsh_status carries no undefined field for an internal caller')
 
   // --- workspace grouping -------------------------------------------------------
-  // The Web sidebar groups by the Workspace registry's recorded membership, so a
-  // session this endpoint starts must be attached or it stays in "Ungrouped".
-  const grouped = await dispatch('dsh_run_prompt', { prompt: 'group me', cwd: dir })
-  assert.equal(grouped.workspace.path, dir)
-  assert.equal(grouped.workspace.created, true, 'the directory had no project, so one is created')
-  assert.equal(grouped.workspace.attached, true)
-  assert.deepEqual(workspaces().find((workspace) => workspace.path === dir).sessionIds, [grouped.sessionId])
-  checks.push('a session this endpoint starts is attached to its directory project, created when missing')
+  // The Web sidebar groups by the Workspace registry's recorded membership, and
+  // this endpoint never invents a project: a session whose directory has none is
+  // left in "Ungrouped", exactly where the Harness would have put it.
+  const unownedDir = await mkdtemp(join(tmpdir(), 'dsh-mcp-ungrouped-'))
+  const before = workspaceCalls().filter((call) => call.path === unownedDir).length
+  const ungrouped = await dispatch('dsh_run_prompt', { prompt: 'no project for this', cwd: unownedDir })
+  assert.equal(ungrouped.workspace, undefined, 'no project is invented for the directory')
+  assert.equal(workspaces().some((workspace) => workspace.path === unownedDir), false)
+  const lookups = workspaceCalls().slice(before)
+  assert.equal(lookups.every((call) => call.op === 'resolve'), true, 'the directory is only looked up')
+  checks.push('a session whose directory has no project stays in Ungrouped')
 
-  const second = await dispatch('dsh_run_prompt', { prompt: 'same directory', cwd: dir })
-  assert.equal(second.workspace.created, false, 'the second session reuses the existing project')
-  assert.equal(workspaces().find((workspace) => workspace.path === dir).sessionIds.length, 2)
-  checks.push('a second session in the same directory reuses its project')
+  // A directory that already is a project is joined, because that is what the
+  // sidebar shows for every session run there.
+  const project = await services.workspaceRegistry.create(unownedDir, 'Existing Project')
+  const grouped = await dispatch('dsh_run_prompt', { prompt: 'join the project', cwd: unownedDir })
+  assert.equal(grouped.workspace.id, project.id)
+  assert.equal(grouped.workspace.created, false, 'the existing project is reused, never recreated')
+  assert.equal(grouped.workspace.attached, true)
+  assert.deepEqual(workspaces().find((workspace) => workspace.path === unownedDir).sessionIds, [grouped.sessionId])
+  checks.push('a session whose directory already has a project joins it')
 
   const joined = await dispatch('dsh_continue_session', { sessionId: grouped.sessionId, prompt: 'continue' })
   assert.equal(joined.workspace.attached, true)
@@ -1331,14 +1344,24 @@ try {
   // The one-shot repair: sessions an earlier build created are still ungrouped,
   // and only this endpoint's own registry knows which ones those are.
   const legacyDir = await mkdtemp(join(tmpdir(), 'dsh-mcp-legacy-'))
+  const legacyProject = await services.workspaceRegistry.create(legacyDir, 'Legacy Project')
   const repair = await groupOwnedSessions({ get: () => services.workspaceRegistry }, {
     ownedSessions: () => [{ sessionId: 'session-legacy', cwd: legacyDir }],
   })
   assert.equal(repair.considered, 1)
-  assert.equal(repair.created, 1, 'the repair creates the missing project')
+  assert.equal(repair.created, 0, 'the repair creates nothing unless asked to')
   assert.equal(repair.attached, 1)
-  assert.equal(workspaces().find((workspace) => workspace.path === legacyDir).sessionIds[0], 'session-legacy')
-  checks.push('the startup repair attaches sessions an earlier build left ungrouped')
+  assert.deepEqual(workspaces().find((workspace) => workspace.path === legacyDir).sessionIds, ['session-legacy'])
+  assert.equal(legacyProject.id, workspaces().find((workspace) => workspace.path === legacyDir).id)
+  checks.push('the startup repair attaches sessions to projects that already exist')
+
+  const inventedDir = await mkdtemp(join(tmpdir(), 'dsh-mcp-invented-'))
+  const optedIn = await groupOwnedSessions({ get: () => services.workspaceRegistry }, {
+    ownedSessions: () => [{ sessionId: 'session-invented', cwd: inventedDir }],
+  }, { create: true })
+  assert.equal(optedIn.created, 1, 'a deployment that opts in gets a project')
+  assert.deepEqual(workspaces().find((workspace) => workspace.path === inventedDir).sessionIds, ['session-invented'])
+  checks.push('creating a project is possible only by opting in')
 
   // --- message delivery and sender attribution ----------------------------------
   const steered = await dispatch('dsh_continue_session', { sessionId: currentId(), prompt: 'steer me', mode: 'steer' })
@@ -1379,6 +1402,7 @@ try {
   assert.equal(configRead.clientPage.inGraph, true)
   assert.equal(configRead.busyMode, 'setting')
   assert.equal(configRead.groupSessions, true)
+  assert.equal(configRead.createGroups, false, 'inventing a project is off by default')
   checks.push('the configuration route reports the surface, the page, and the delivery policy')
 
   const configWrite = await (await fetch(configUrl, {
@@ -1422,7 +1446,29 @@ try {
     body: JSON.stringify({}),
   })
   assert.equal(emptyRefusal.status, 400)
-  checks.push('the configuration route rejects a non-boolean, an unknown mode, and an empty patch')
+  const relativeRemoval = await fetch(configUrl, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ removeGroups: ['not/absolute'] }),
+  })
+  assert.equal(relativeRemoval.status, 400)
+  checks.push('the configuration route rejects a non-boolean, an unknown mode, an empty patch, and a relative path')
+
+  // Undoing automation: a project registration can be dropped deliberately.
+  const removeNow = async () => (await fetch(configUrl, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ removeGroups: [inventedDir] }),
+  })).json()
+  const removal = await removeNow()
+  assert.equal(removal.ok, true)
+  assert.equal(removal.removal.removed.length, 1)
+  assert.equal(removal.removal.removed[0].path, inventedDir)
+  assert.equal(removal.applied, 'unchanged', 'a removal does not reload the plugin')
+  assert.equal(workspaces().some((workspace) => workspace.path === inventedDir), false)
+  const removalAgain = await removeNow()
+  assert.deepEqual(removalAgain.removal.missing, [inventedDir], 'a second removal reports the path as missing')
+  checks.push('the configuration route removes a project registration without touching sessions')
 
   const foreignResponse = {
     statusCode: 0,

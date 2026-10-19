@@ -193,6 +193,7 @@ v0.7.0 did.
 | Web **Plugins** page → this bundle's row → **Configure** | The switch and the surface mode. They save through the profile configuration editor, so they land in `cordis.patch.yml` exactly like a hand edit, and the row reloads. |
 | `GET /mcp-config` (loopback only) | The current state: `exposeToDsh`, `exposeToDshMode`, the MCP URL, the published and registered names, the version. |
 | `POST /mcp-config` `{ "exposeToDsh": false }` or `{ "exposeToDshMode": "full" }` | The same writes the page performs. |
+| `POST /mcp-config` `{ "removeGroups": ["/abs/path"] }` | Drop project registrations by directory — the way to undo grouping automation. No folder, file, or Session is touched; those Sessions return to Ungrouped. |
 
 Both `dsh_status` and `GET /mcp-config` also report `clientPage: { available, inGraph, bundle }` — the
 Host's browser module registry answering whether this bundle's page is really being served. It stays
@@ -230,12 +231,17 @@ The Web sidebar groups Sessions by the Workspace registry's **recorded membershi
 bootstrap only grouped the Sessions that already existed when it first ran. A Session created later by
 this endpoint therefore trailed in **Ungrouped** even when its directory was already a project.
 
-`dsh_run_prompt` now attaches the Session it just created to that directory's project — creating the
-project when the directory has none — and returns it as `workspace: { id, path, title, created, attached }`.
-A continuation joins the project its directory already has and never invents one. On activation the
-plugin also repairs the backlog once, in the background: every Session its own caller registry attributes
-to a caller, whose directory it recorded, is attached — which is what finally moves the Sessions created
-by earlier builds out of Ungrouped. Set `groupSessions: false` to keep automation out of the sidebar.
+`dsh_run_prompt` attaches the Session it just created to the project its directory **already** has, and
+returns it as `workspace: { id, path, title, created, attached }`. It never invents a project: a
+directory with no project keeps its Sessions in Ungrouped, which is where the Harness itself would put
+them. `createGroups: true` opts into inventing one; `groupSessions: false` turns the whole behaviour off.
+
+A continuation joins an existing project and never creates one. On activation the plugin also repairs the
+backlog once, in the background, under the same rule: every Session its own caller registry attributes to
+a caller, whose directory already is a project, is attached — which is what moves the Sessions created by
+earlier builds out of Ungrouped. A project this endpoint did create can be dropped again with
+`POST /mcp-config { "removeGroups": ["/abs/path"] }`, or from the sidebar's own delete action; either way
+the Sessions stay and simply return to Ungrouped.
 
 ### Queue or steer, following the deployment's own setting
 
@@ -321,7 +327,8 @@ The bundle row in `cordis.patch.yml` accepts (all optional):
 | `exposeToDshPage` | `true` | Serve the loopback configuration route the Web Plugins page's switch reads and writes. |
 | `configPath` | `<path>-config` | Route path of that configuration endpoint (`/mcp-config` by default). |
 | `entryId` | `dsh-mcp-server` | Profile row the configuration page addresses when it saves the switch. |
-| `groupSessions` | `true` | Attach the Sessions this endpoint starts to their directory's project in the Web sidebar (creating it when missing), and repair the Sessions earlier builds left in "Ungrouped". |
+| `groupSessions` | `true` | Attach the Sessions this endpoint starts to the project their directory **already** has, and, once and in the background, restore the Sessions earlier builds left in "Ungrouped". |
+| `createGroups` | `false` | Let this endpoint invent a sidebar project for a directory that has none. Off by default: automation does not grow the sidebar on its own, and a Session whose directory has no project stays in Ungrouped. |
 | `busyMode` | `setting` | Delivery to a session that is already running: `setting` follows the deployment's own `ui-conversation.busyEnter`, `queue` always waits for the next turn, `steer` always injects mid-turn. A caller's `mode` argument wins over all three. |
 | `maxBodyBytes` | `8388608` | Request body ceiling. |
 | `instructions` | built-in text | Replaces the instructions handed to the calling model. |
@@ -446,7 +453,7 @@ private profile, with the token the server is configured with.
 ```bash
 node test/mcp-self-test.mjs            # 11 transport checks, no Harness needed
 node test/client-half-test.mjs         # 8 checks: the browser half's row page and its read/write route
-node test/plugin-integration-test.mjs  # 103 checks: apply(), endpoint file + advertised URL, tools,
+node test/plugin-integration-test.mjs  # 105 checks: apply(), endpoint file + advertised URL, tools,
                                        # transcript windows, outline/paging/truncation, search, index
                                        # cursors, pending user decisions (PTC included), parked approvals
                                        # and questions answered over MCP, waiting, caller identity +
@@ -507,7 +514,8 @@ and the stdio bridge.
   it. Open the few tools a task needs; use `dsh_mcp_call` for one-offs.
 - **Grouping is the sidebar's own membership record.** A Session's project is recorded, not derived
   while rendering, so "it runs in that directory" is not enough — something has to attach it. This plugin
-  does that for the Sessions it starts and, once, for the ones it started before.
+  does that for the Sessions it starts and, once, for the ones it started before, and it only ever joins a
+  project that already exists.
 - Sessions started over MCP are ordinary DSH sessions: they appear in the Harness session list and can
   be opened and continued in the GUI.
 

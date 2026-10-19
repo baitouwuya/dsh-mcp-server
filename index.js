@@ -26,7 +26,7 @@ import { registerDshTools } from './lib/dsh-tools-bridge.js'
 import { groupOwnedSessions } from './lib/workspace-grouping.js'
 
 /** Keep in sync with package.json; reported through `initialize`. */
-const VERSION = '0.8.1'
+const VERSION = '0.8.2'
 
 /** This package's own name, as the profile's bundle row spells it. */
 const PACKAGE_NAME = (() => {
@@ -146,6 +146,14 @@ export function apply(ctx, config = {}) {
   // the Web sidebar; without that they trail in "Ungrouped" forever.
   const groupSessions = config.groupSessions !== false
   /**
+   * Whether this endpoint may invent a sidebar project.
+   *
+   * Off by default: a Session whose directory has no project is left in
+   * "Ungrouped", which is where the Harness would have put it. Turn it on to let
+   * the endpoint create one for each directory it runs sessions in.
+   */
+  const createGroups = config.createGroups === true
+  /**
    * How a prompt is delivered to a session that is already running.
    *
    * `setting` (the default) follows this deployment's own `ui-conversation.busyEnter`,
@@ -262,6 +270,7 @@ export function apply(ctx, config = {}) {
     dshTools,
     clientPage: clientPageState,
     groupSessions,
+    createGroups,
     busyMode,
   })
 
@@ -360,10 +369,38 @@ export function apply(ctx, config = {}) {
       published: dshToolsState.published,
       registered: dshToolsState.names,
       groupSessions,
+      createGroups,
       busyMode,
       url: `${resolveBaseUrl()}${path}`,
       clientPage: clientPageState(),
     }
+  }
+
+  /**
+   * Remove project registrations this endpoint should not have made.
+   *
+   * A deliberate maintenance action, never something the plugin does on its own:
+   * removing a registration deletes no folder, file, or Session — those Sessions
+   * simply return to "Ungrouped".
+   */
+  async function removeDshGroups(paths) {
+    const registry = ctx.get('workspaceRegistry')
+    if (typeof registry?.resolveByPath !== 'function' || typeof registry?.delete !== 'function') {
+      throw new Error('This Harness exposes no workspace registry, so a project registration cannot be removed here.')
+    }
+    const removed = []
+    const missing = []
+    for (const path of paths) {
+      const workspace = await registry.resolveByPath(path)
+      if (!workspace) {
+        missing.push(path)
+        continue
+      }
+      await registry.delete(workspace.id)
+      removed.push({ id: workspace.id, path: workspace.path, title: workspace.title })
+    }
+    log('info', 'removed project registrations', { removed: removed.map((entry) => entry.path), missing })
+    return { removed, missing }
   }
 
   /**
@@ -392,7 +429,7 @@ export function apply(ctx, config = {}) {
     ? ctx.webServer.register({
       kind: 'exact',
       path: configPath,
-      handler: createConfigHandler({ snapshot: configSnapshot, write: writeDshSurface, logger: log }),
+      handler: createConfigHandler({ snapshot: configSnapshot, write: writeDshSurface, remove: removeDshGroups, logger: log }),
     })
     : undefined
 
@@ -477,7 +514,7 @@ export function apply(ctx, config = {}) {
   function repairGrouping() {
     if (!groupSessions) return
     const run = () => {
-      void groupOwnedSessions(ctx, clients, { logger: log })
+      void groupOwnedSessions(ctx, clients, { create: createGroups, logger: log })
         .then((result) => {
           if (result && (result.attached > 0 || result.created > 0)) {
             log('info', 'regrouped sessions this endpoint had created', result)
@@ -545,6 +582,7 @@ export function apply(ctx, config = {}) {
     exposeToDsh,
     exposeToDshMode,
     groupSessions,
+    createGroups,
     busyMode,
     dshTools: dshToolsState.names.length,
     clientPage: clientPageState(),
