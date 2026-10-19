@@ -171,12 +171,19 @@ sessions that actually use it. `dsh_status` reports the whole shape:
 
 ### Adding tools mid-session
 
-`dsh_mcp_open` is not a naming trick: DSH supports adding tools while a session runs. The agent loop
-diffs the tool set between requests, appends a `developer/message` carrying `tool-addition` (and
-`tool-removal`) blocks for that `request/header` change, and the provider adapter renders it in the
-form its own `toolUpdate` mode requires (`addition-only` or `in-history`). The registrations
-themselves go into the **calling agent's** scope, so they follow that agent alone and unwind when it is
-disposed — `open` in one session never leaks into another.
+`dsh_mcp_open` is not a naming trick: DSH supports adding tools while a session runs, and both
+presentations follow the registry.
+
+- **Native mode** changes the request's tool set. The agent loop writes a new `request/header` and appends
+  a `developer/message` carrying `tool-addition` (and `tool-removal`) blocks, which the provider adapter
+  renders in the form its own `toolUpdate` mode requires (`addition-only` or `in-history`).
+- **PTC mode** sends exactly one `run_code` tool whatever is mounted, so the opened tools arrive in the
+  regenerated SDK inside the prompt instead. Measured in this repository's own session: opening two tools
+  grew the assembled `system/message` from 60,499 to 62,404 characters, the new names appear in it, and
+  every `request/header` still listed only `run_code`.
+
+Either way the registrations go into the **calling agent's** scope, so they follow that agent alone and
+unwind when it is disposed — `open` in one session never leaks into another.
 
 Set `exposeToDshMode: "full"` to put the whole table in the prompt at load instead, which is what
 v0.7.0 did.
