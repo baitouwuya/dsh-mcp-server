@@ -71,6 +71,34 @@ assert.equal(typeof rendered.type, 'function', 'the page view renders the config
 assert.equal(rendered.props.t('title') !== 'title', true, 'the panel receives a translator')
 checks.push('the row page renders a summary string and the configuration panel')
 
+// Render the panel body itself: React.createElement does not call a component, so
+// a broken control would otherwise only show up in a browser. The stub reports
+// every switch as "on", which is what makes the optional controls render.
+const renderingReact = {
+  createElement: React.createElement,
+  useState: (value) => [value === undefined ? true : value, () => {}],
+  useEffect: () => {},
+  useCallback: (callback) => callback,
+}
+const panelHost = spec.factory(() => renderingReact)
+const panelPage = (() => {
+  const registered = []
+  const slots = { inject: (_name, callback) => { callback(); return () => {} }, register: (options, component) => { registered.push(component); return () => {} } }
+  panelHost.apply({ get: (name) => (name === 'slots' ? slots : undefined), effect: (create) => create() })
+  return registered[0]
+})()
+const collectText = (node) => {
+  if (node === null || node === undefined || typeof node === 'boolean') return []
+  if (typeof node === 'string' || typeof node === 'number') return [String(node)]
+  if (Array.isArray(node)) return node.flatMap(collectText)
+  return collectText(node.children)
+}
+const labels = collectText(panelPage({ view: 'page' }).type(panelPage({ view: 'page' }).props))
+for (const expected of ['Surface', 'On demand', 'All at once', 'Sidebar projects', 'Join an existing project', 'May create projects', 'Delivery while busy', 'Follow the setting', 'Queue', 'Steer']) {
+  assert.ok(labels.includes(expected), `the settings page must offer "${expected}"`)
+}
+checks.push('the settings page renders every control it offers')
+
 // --- the switch's read/write contract ----------------------------------------
 let written
 let command = null
