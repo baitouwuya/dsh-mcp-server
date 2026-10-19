@@ -1241,11 +1241,13 @@ try {
   const frontDoor = registeredTools().find((tool) => tool.name === 'dsh_mcp_tools')
   for (const name of mcpNames) assert.ok(frontDoor.description.includes(name), `${name} is named in the front-door index`)
   assert.match(frontDoor.description, /dsh_continue_session\(sessionId, prompt\)/, 'the index states the required arguments')
+  assert.match(frontDoor.description, /dsh_run_command\(sessionId, line\|command\)/, 'a tool whose required list is not its whole signature says so')
+  assert.match(frontDoor.description, /dsh_answer_request\(requestId, decision\|answers\)/, 'a decision-shaped tool says which of the two it takes')
   const frontDoorIndexCost = registeredTools()
     .reduce((total, tool) => total + tool.description.length + JSON.stringify(tool.parameters).length, 0)
   const fullTableCost = listed.result.tools
     .reduce((total, tool) => total + tool.description.length + JSON.stringify(tool.inputSchema).length, 0)
-  assert.ok(frontDoorIndexCost < 3000, 'the index keeps the front door under 3 KB')
+  assert.ok(frontDoorIndexCost < 3500, 'the index keeps the front door under 3.5 KB')
   assert.ok(frontDoorIndexCost * 4 < fullTableCost, 'the front door stays a fraction of the full table')
   checks.push(`the front door names all eighteen tools with their signatures (${frontDoorIndexCost} chars vs ${fullTableCost} for the table)`)
 
@@ -1258,6 +1260,22 @@ try {
   const nonsense = await dispatch('zzz', {}).then(() => undefined, (error) => error)
   assert.match(String(nonsense && nonsense.message), /not a tool this DSH deployment publishes/)
   checks.push('a bare or near-miss name resolves, or is refused with the close matches named')
+
+  // The two ways a model can lose control of the lazy surface: calling the
+  // front door through itself, and opening the whole table without asking.
+  const frontDoorCall = await dispatch('dsh_mcp_tools', {}).then(() => undefined, (error) => error)
+  assert.match(String(frontDoorCall && frontDoorCall.message), /cannot call the front door itself/)
+  const wrongType = await metaCall('dsh_mcp_call', { tool: 42 }).then(() => undefined, (error) => error)
+  assert.match(String(wrongType && wrongType.message), /must be a published tool name as a string/)
+  const omitOpen = await metaCall('dsh_mcp_open', {}, makeAgent()).then(() => undefined, (error) => error)
+  assert.match(String(omitOpen && omitOpen.message), /needs an explicit target/)
+  const stringOpen = await metaCall('dsh_mcp_open', { tools: 'dsh_status' }, makeAgent()).then(() => undefined, (error) => error)
+  assert.match(String(stringOpen && stringOpen.message), /must be an array of published names/)
+  const emptyOpen = await metaCall('dsh_mcp_open', { tools: [] }, makeAgent()).then(() => undefined, (error) => error)
+  assert.match(String(emptyOpen && emptyOpen.message), /at least one published name/)
+  const wholeSet = await metaCall('dsh_mcp_open', { all: true }, makeAgent())
+  assert.equal(wholeSet.native.length, 18, 'all: true is still the way to the whole table')
+  checks.push('the front-door refusal is reachable, and opening always needs an explicit target')
 
   // Opening is per agent: the registrations land in the calling agent's own
   // scope, which is what makes DSH announce them as tool additions.

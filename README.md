@@ -162,11 +162,11 @@ that session ever delegates anything or not. So the default surface is a three-t
 
 | Front-door tool | Purpose |
 |---|---|
-| `dsh_mcp_tools` | The catalogue — every published name **with its call signature** — plus one line per tool and `native` when it is already callable. `name` returns that tool's complete parameter schema. |
-| `dsh_mcp_open` | Register the named tools (**or `all: true`) into *this* session**, so they are callable natively from the next step on. |
+| `dsh_mcp_tools` | The catalogue — every published name **with its call signature** — plus one line per tool and `native` when it is already callable. `name` returns that tool's parameter schema, projected for the DSH registry. |
+| `dsh_mcp_open` | Register the named tools (**or `all: true`) into *this* session**, so they are callable natively from the next step on. The target is always explicit: an empty or missing list is refused rather than quietly opening all eighteen. |
 | `dsh_mcp_call` | Call one published tool directly, without opening it — for a single call that does not deserve a permanent schema. |
 
-That is ~2.8 KB (~700 tokens) at rest instead of ~17.2 KB, and the rest of the table is paid for only by
+That is ~3.0 KB (~750 tokens) at rest instead of ~17.2 KB, and the rest of the table is paid for only by
 sessions that actually use it. `dsh_status` reports the whole shape:
 `dshTools: { enabled, mode, registered, published, via }`.
 
@@ -184,6 +184,10 @@ That index is ~600 characters (~150 tokens) and turns "send this to session X" i
 a bare `continue_session` resolves, a near miss is refused with the close matches named, `arguments`
 accepts a JSON object string, and a refused call ends by naming the `dsh_mcp_tools({ name })` lookup that
 fixes it. The index is the whole discovery budget — nothing else is paid until a tool is actually opened.
+
+Two tools whose `required` list is not their whole signature say so in the index —
+`dsh_run_command(sessionId, line|command)` and `dsh_answer_request(requestId, decision|answers)` — because a
+signature a model would be refused for following is worse than no signature at all.
 
 ### Adding tools mid-session
 
@@ -502,7 +506,7 @@ private profile, with the token the server is configured with.
 ```bash
 node test/mcp-self-test.mjs            # 11 transport checks, no Harness needed
 node test/client-half-test.mjs         # 11 checks: the browser half's row page, its settings, its route
-node test/plugin-integration-test.mjs  # 111 checks: apply(), endpoint file + advertised URL, tools,
+node test/plugin-integration-test.mjs  # 112 checks: apply(), endpoint file + advertised URL, tools,
                                        # transcript windows, outline/paging/truncation, search, index
                                        # cursors, pending user decisions (PTC included), parked approvals
                                        # and questions answered over MCP, waiting, caller identity +
