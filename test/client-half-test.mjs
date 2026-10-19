@@ -76,12 +76,14 @@ let written
 const handler = createConfigHandler({
   snapshot: () => ({
     package: '@local/dsh-mcp-server',
-    version: '0.7.0',
-    exposeToDsh: written === undefined ? true : written,
-    tools: ['dsh_status'],
+    version: '0.8.0',
+    exposeToDsh: written?.exposeToDsh ?? true,
+    exposeToDshMode: written?.exposeToDshMode ?? 'lazy',
+    published: ['dsh_status'],
+    registered: ['dsh_mcp_tools'],
     url: 'http://127.0.0.1:9/mcp',
   }),
-  write: async (next) => { written = next },
+  write: async (patch) => { written = { ...(written ?? {}), ...patch } },
 })
 const server = createServer((req, res) => { void handler(req, res) })
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
@@ -89,18 +91,25 @@ const base = `http://127.0.0.1:${server.address().port}`
 
 const read = await exported.readSetting(base)
 assert.equal(read.exposeToDsh, true, 'a read reports the live switch')
+assert.equal(read.exposeToDshMode, 'lazy', 'a read reports the surface mode')
 assert.equal(read.url, 'http://127.0.0.1:9/mcp')
-checks.push('the client half reads the switch from the Host route')
+checks.push('the client half reads the switch and the mode from the Host route')
 
-const write = await exported.writeSetting(false, base)
+const write = await exported.writePatch({ exposeToDsh: false }, base)
 assert.equal(write.ok, true)
 assert.equal(write.exposeToDsh, false, 'the response echoes what was asked for')
-assert.equal(written, false, 'the Host route received the new value')
+assert.equal(written.exposeToDsh, false, 'the Host route received the new value')
 checks.push('the client half writes the switch through the Host route')
+
+const modeWrite = await exported.writePatch({ exposeToDshMode: 'full' }, base)
+assert.equal(modeWrite.ok, true)
+assert.equal(written.exposeToDshMode, 'full', 'the mode patch reached the Host route')
+checks.push('the client half writes the surface mode through the same route')
 
 const reread = await exported.readSetting(base)
 assert.equal(reread.exposeToDsh, false, 'a later read sees the saved value')
-checks.push('a saved switch is what the next read reports')
+assert.equal(reread.exposeToDshMode, 'full', 'a later read sees the saved mode')
+checks.push('a saved setting is what the next read reports')
 
 await new Promise((resolve) => server.close(resolve))
 console.log(`${checks.length} client half checks passed`)

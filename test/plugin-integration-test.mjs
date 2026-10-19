@@ -324,9 +324,45 @@ function makeServices() {
     graph: () => ({ entries: [{ id: '@local/dsh-mcp-server' }, { id: '@deepseek-ai/dsh-client-ui-theme' }] }),
   }
 
+  /** Per-agent tool registrations, the way an agent's own scope holds them. */
+  const agentScopes = new WeakMap()
+
+  /** A calling agent with the scoped context `dsh_mcp_open` registers into. */
+  function makeAgent(id = 'agent-live', sessionId = 'live-session') {
+    const agent = { id, session: { header: { id: sessionId } } }
+    const registered = []
+    agentScopes.set(agent, registered)
+    const scope = {
+      tools: {
+        register(definition) {
+          registered.push(definition)
+          return () => {
+            const index = registered.indexOf(definition)
+            if (index >= 0) registered.splice(index, 1)
+          }
+        },
+      },
+      effect: (create) => create(),
+      inject: (_deps, callback) => { callback(scope); return { dispose() {} } },
+    }
+    agent.ctx = scope
+    return agent
+  }
+
+  /** The tools one agent can see natively. */
+  function agentTools(agent) {
+    return [...(agentScopes.get(agent) ?? [])]
+  }
+
   /** The Harness tool registry: what the bridge registers into. */
   const tools = {
     schemas: () => [{ name: 'read_file', description: 'Read a file' }],
+    // `ctx.tools.get(name, scope)`: no scope is the global registry, an agent
+    // is what that agent sees — which is how the bridge tells native from not.
+    get(name, scope) {
+      const rows = scope === undefined ? registeredTools : (agentScopes.get(scope) ?? [])
+      return rows.find((definition) => definition.name === name)
+    },
     register(definition) {
       registeredTools.push(definition)
       return () => {
@@ -371,6 +407,8 @@ function makeServices() {
     executedCommands: () => [...executedCommands],
     currentId: () => currentSessionId,
     registeredTools: () => [...registeredTools],
+    makeAgent,
+    agentTools,
     configEdits: () => [...configEdits],
     setCallerMode: (mode) => { callerMode = mode },
     setCallerPreset: (preset) => { callerPreset = preset },
@@ -379,7 +417,7 @@ function makeServices() {
 
 const dir = await mkdtemp(join(tmpdir(), 'dsh-mcp-test-'))
 const endpointFile = join(dir, 'dsh-mcp-endpoint.json')
-const { services, webServer, getPrompt, setBusy, archivedIds, appliedPermissions, modelSelections, cancelledSessions, setRunning, setHang, seedMessages, seedEvents, addSyntheticSessions, resolvedAgents, listedCommandAgents, executedCommands, currentId, registeredTools, configEdits, setCallerMode, setCallerPreset } = makeServices()
+const { services, webServer, getPrompt, setBusy, archivedIds, appliedPermissions, modelSelections, cancelledSessions, setRunning, setHang, seedMessages, seedEvents, addSyntheticSessions, resolvedAgents, listedCommandAgents, executedCommands, currentId, registeredTools, makeAgent, agentTools, configEdits, setCallerMode, setCallerPreset } = makeServices()
 let sessionIdFromRun
 const disposers = []
 const ctx = makeContext(services, disposers)
@@ -807,9 +845,9 @@ try {
   // answerers get before the decision is asked for.
   await new Promise((resolve) => setTimeout(resolve, 30))
   const internalAnswer = (name, args) => {
-    const definition = responder.registeredTools().find((tool) => tool.name === name)
-    assert.ok(definition, `the bridge registered ${name}`)
-    return definition.execute(args, { agent: INTERNAL_AGENT })
+    const definition = responder.registeredTools().find((tool) => tool.name === 'dsh_mcp_call')
+    assert.ok(definition, 'the responder front door exposes dsh_mcp_call')
+    return definition.execute({ tool: name, arguments: args }, { agent: INTERNAL_AGENT })
   }
   responder.setCallerMode('workspace-write')
   const refusedApproval = await internalAnswer('dsh_answer_request', { requestId: 'call-internal-approval', decision: 'allow' })
@@ -1077,51 +1115,86 @@ try {
   // --- the DSH-facing tool surface ---------------------------------------------
   const listed = await rpc({ jsonrpc: '2.0', id: ++id, method: 'tools/list', params: {} })
   const mcpNames = listed.result.tools.map((tool) => tool.name).sort()
-  const localNames = registeredTools().map((tool) => tool.name).sort()
-  assert.equal(localNames.length, 17, 'every published tool is registered locally')
-  assert.deepEqual(localNames, mcpNames, 'the local surface carries exactly the published tools')
-  checks.push('every MCP tool is registered into the Harness tool registry under the same name')
+  assert.equal(mcpNames.length, 17, 'the MCP endpoint publishes seventeen tools')
 
-  const runPromptTool = registeredTools().find((tool) => tool.name === 'dsh_run_prompt')
-  assert.equal(runPromptTool.parameters.properties.prompt.minLength, undefined, 'unsupported keywords must be dropped')
-  assert.deepEqual(runPromptTool.parameters.properties.wait, { type: 'boolean', description: 'Wait for the turn to finish (default true).' })
-  assert.deepEqual(runPromptTool.parameters.required, ['prompt'])
-  assert.equal(runPromptTool.parameters.additionalProperties, false)
-  checks.push('the schema projection keeps the enforced keywords and drops the rest')
-
-  assert.equal(runPromptTool.output.render(undefined, { answer: 42 })[0].text, '{\n  "answer": 42\n}')
-  assert.equal(runPromptTool.output.render(undefined, 'plain')[0].text, 'plain')
-  checks.push('a registered tool renders its canonical value as model text')
+  // The default surface is the front door: three small schemas instead of
+  // seventeen, so a session pays for the catalogue only when it needs it.
+  assert.deepEqual(
+    registeredTools().map((tool) => tool.name).sort(),
+    ['dsh_mcp_call', 'dsh_mcp_open', 'dsh_mcp_tools'],
+    'the lazy surface registers only the front door',
+  )
+  const frontDoorCost = registeredTools()
+    .reduce((total, tool) => total + tool.description.length + JSON.stringify(tool.parameters).length, 0)
+  checks.push(`the default surface is a three-tool front door (${frontDoorCost} chars instead of the full table)`)
 
   const localStatus = await call('dsh_status', {})
   assert.equal(localStatus.dshTools.enabled, true)
-  assert.equal(localStatus.dshTools.count, 17)
+  assert.equal(localStatus.dshTools.mode, 'lazy')
+  assert.equal(localStatus.dshTools.published, 17, 'every published tool stays openable')
+  assert.deepEqual(localStatus.dshTools.registered.slice().sort(), ['dsh_mcp_call', 'dsh_mcp_open', 'dsh_mcp_tools'])
   assert.equal(localStatus.clientPage.available, true)
   assert.equal(localStatus.clientPage.inGraph, true)
   assert.equal(localStatus.clientPage.bundle, '/tmp/pkg/lib/client.js')
-  checks.push('dsh_status reports the local tool surface, its size, and the served client page')
+  checks.push('dsh_status reports the surface mode, its size, and the served client page')
 
-  const internalCall = (name, args) => {
+  const metaCall = (name, args, agent = INTERNAL_AGENT) => {
     const definition = registeredTools().find((tool) => tool.name === name)
-    assert.ok(definition, `the bridge registered ${name}`)
-    return definition.execute(args, { agent: INTERNAL_AGENT })
+    assert.ok(definition, `the front door exposes ${name}`)
+    return definition.execute(args, { agent })
   }
-  const refusedBy = async (name, args) => {
+  const dispatch = (tool, args, agent = INTERNAL_AGENT) => metaCall('dsh_mcp_call', { tool, arguments: args }, agent)
+  const refusedBy = async (tool, args) => {
     try {
-      await internalCall(name, args)
+      await dispatch(tool, args)
       return undefined
     } catch (error) {
       return error
     }
   }
 
+  const catalogue = await metaCall('dsh_mcp_tools', {})
+  assert.equal(catalogue.total, 17)
+  assert.equal(catalogue.count, 17)
+  assert.equal(catalogue.tools.every((row) => row.native === false), true, 'nothing is native until it is opened')
+  assert.ok(catalogue.tools.every((row) => row.purpose.length > 0 && row.purpose.length < 200), 'a catalogue row stays one line')
+  const searched = await metaCall('dsh_mcp_tools', { query: 'transcript' })
+  assert.ok(searched.count > 0 && searched.count < 17, 'a query narrows the catalogue')
+  const one = await metaCall('dsh_mcp_tools', { name: 'dsh_read_session' })
+  assert.equal(one.name, 'dsh_read_session')
+  assert.ok(one.parameters.properties.mode, 'a single lookup returns the parameter schema')
+  assert.equal(one.parameters.properties.mode.minLength, undefined, 'the schema is projected for the registry')
+  const unknownLookup = await metaCall('dsh_mcp_tools', { name: 'nope' }).then(() => undefined, (error) => error)
+  assert.match(String(unknownLookup && unknownLookup.message), /not a tool this DSH deployment publishes/)
+  checks.push('the catalogue lists narrowly and returns one full schema on demand')
+
+  // Opening is per agent: the registrations land in the calling agent's own
+  // scope, which is what makes DSH announce them as tool additions.
+  const agent = makeAgent()
+  const opened = await metaCall('dsh_mcp_open', { tools: ['dsh_run_prompt', 'dsh_run_command'] }, agent)
+  assert.deepEqual([...opened.opened].sort(), ['dsh_run_command', 'dsh_run_prompt'])
+  assert.deepEqual([...opened.native].sort(), ['dsh_run_command', 'dsh_run_prompt'])
+  assert.equal(registeredTools().length, 3, 'opening does not grow the global registry')
+  assert.deepEqual(agentTools(agent).map((tool) => tool.name).sort(), ['dsh_run_command', 'dsh_run_prompt'])
+  const reopened = await metaCall('dsh_mcp_open', { tools: ['dsh_run_prompt'] }, agent)
+  assert.deepEqual(reopened.opened, [], 'opening twice registers nothing twice')
+  assert.deepEqual(reopened.alreadyOpen, ['dsh_run_prompt'])
+  const unknownOpen = await metaCall('dsh_mcp_open', { tools: ['nope'] }, agent).then(() => undefined, (error) => error)
+  assert.match(String(unknownOpen && unknownOpen.message), /not a tool this DSH deployment publishes/)
+  checks.push('dsh_mcp_open registers the asked-for tools in the calling agent scope, once')
+
+  const openRunner = agentTools(agent).find((tool) => tool.name === 'dsh_run_prompt')
+  const openedRun = await openRunner.execute({ prompt: 'opened run', cwd: '/tmp' }, { agent })
+  assert.equal(openedRun.status, 'completed')
+  checks.push('an opened tool runs natively for that agent')
+
   setCallerMode('workspace-write')
   setCallerPreset('workspace-write')
-  const localRun = await internalCall('dsh_run_prompt', { prompt: 'internal delegation', cwd: '/tmp' })
+  const localRun = await dispatch('dsh_run_prompt', { prompt: 'internal delegation', cwd: '/tmp' })
   assert.equal(localRun.status, 'completed')
   assert.equal(localRun.permissionPreset, 'workspace-write', 'a started session is pinned to the caller preset')
   assert.equal(localRun.owner.id, 'dsh-agent:live-session', 'an internal call is attributed to the calling session')
-  checks.push('an internal caller is attributed to its session and starts pinned to its own preset')
+  checks.push('a dispatched call is attributed to its session and starts pinned to its own preset')
 
   const widerRefusal = await refusedBy('dsh_run_prompt', { prompt: 'too wide', cwd: '/tmp', permissionPreset: 'danger-full-access' })
   assert.ok(widerRefusal, 'a preset wider than the caller must be refused')
@@ -1130,8 +1203,8 @@ try {
 
   setCallerMode('danger-full-access')
   setCallerPreset('danger-full-access')
-  const narrowed = await internalCall('dsh_run_prompt', { prompt: 'narrower', cwd: '/tmp', permissionPreset: 'read-only' })
-  assert.equal(narrowed.permissionPreset, 'read-only', 'a narrower preset is not a privilege grant')
+  const narrowedPreset = await dispatch('dsh_run_prompt', { prompt: 'narrower', cwd: '/tmp', permissionPreset: 'read-only' })
+  assert.equal(narrowedPreset.permissionPreset, 'read-only', 'a narrower preset is not a privilege grant')
   checks.push('an internal caller may still set a preset at or below its own rung')
 
   setCallerMode('workspace-write')
@@ -1141,14 +1214,22 @@ try {
   assert.match(String(commandRefusal.message), /wider than the calling DSH agent/)
   checks.push('a /permission slash command cannot bypass the internal ceiling')
 
+  const nativeRefusal = await openRunner
+    .execute({ prompt: 'natively too wide', cwd: '/tmp', permissionPreset: 'danger-full-access' }, { agent })
+    .then(() => undefined, (error) => error)
+  assert.match(String(nativeRefusal && nativeRefusal.message), /wider than the calling DSH agent/)
+  checks.push('the ceiling applies to a natively opened tool exactly as to a dispatched one')
+
   // --- the configuration route the settings page drives -------------------------
   const configUrl = `http://127.0.0.1:${port.address().port}/mcp-config`
   const configRead = await (await fetch(configUrl)).json()
   assert.equal(configRead.exposeToDsh, true)
-  assert.equal(configRead.registered, 17)
+  assert.equal(configRead.exposeToDshMode, 'lazy')
+  assert.deepEqual([...configRead.registered].sort(), ['dsh_mcp_call', 'dsh_mcp_open', 'dsh_mcp_tools'])
+  assert.equal(configRead.published.length, 17)
   assert.equal(configRead.configPath, '/mcp-config')
   assert.equal(configRead.clientPage.inGraph, true)
-  checks.push('the configuration route reports the current switch and the client page')
+  checks.push('the configuration route reports the surface and the client page')
 
   const configWrite = await (await fetch(configUrl, {
     method: 'POST',
@@ -1162,13 +1243,36 @@ try {
   assert.equal(configEdits()[0].next.exposeToDsh, false)
   checks.push('the configuration route saves the switch through the profile configuration editor')
 
+  const modeWrite = await (await fetch(configUrl, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ exposeToDshMode: 'full' }),
+  })).json()
+  assert.equal(modeWrite.ok, true)
+  assert.equal(modeWrite.exposeToDshMode, 'full')
+  assert.equal(configEdits().length, 2)
+  assert.equal(configEdits()[1].next.exposeToDshMode, 'full')
+  checks.push('the configuration route saves the surface mode')
+
   const configRefusal = await fetch(configUrl, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ exposeToDsh: 'yes' }),
   })
   assert.equal(configRefusal.status, 400)
-  checks.push('the configuration route rejects a payload that is not a boolean')
+  const modeRefusal = await fetch(configUrl, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ exposeToDshMode: 'sometimes' }),
+  })
+  assert.equal(modeRefusal.status, 400)
+  const emptyRefusal = await fetch(configUrl, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({}),
+  })
+  assert.equal(emptyRefusal.status, 400)
+  checks.push('the configuration route rejects a non-boolean, an unknown mode, and an empty patch')
 
   const foreignResponse = {
     statusCode: 0,
@@ -1180,23 +1284,48 @@ try {
   assert.equal(foreignResponse.statusCode, 403)
   checks.push('the configuration route answers the local machine only')
 
-  const offTools = []
-  const offCtx = makeContext({
+  /** A throwaway context that only records what a registration would install. */
+  const collectorContext = (sink) => makeContext({
     webServer: { register: () => () => {} },
-    tools: { register: (definition) => { offTools.push(definition); return () => {} } },
+    tools: {
+      register: (definition) => { sink.push(definition); return () => {} },
+      get: () => undefined,
+    },
   }, [])
-  apply(offCtx, { token: 'off-token', endpointFile: join(dir, 'off-endpoint.json'), url: 'http://127.0.0.1:9', dshHome: dir, exposeToDsh: false })
+
+  const offTools = []
+  apply(collectorContext(offTools), { token: 'off-token', endpointFile: join(dir, 'off-endpoint.json'), url: 'http://127.0.0.1:9', dshHome: dir, exposeToDsh: false })
   assert.equal(offTools.length, 0, 'the switch off keeps the surface MCP-only')
   checks.push('exposeToDsh: false leaves the Harness tool registry untouched')
 
   const onTools = []
-  const onCtx = makeContext({
-    webServer: { register: () => () => {} },
-    tools: { register: (definition) => { onTools.push(definition); return () => {} } },
-  }, [])
-  apply(onCtx, { token: 'on-token', endpointFile: join(dir, 'on-endpoint.json'), url: 'http://127.0.0.1:9', dshHome: dir })
-  assert.equal(onTools.length, 17, 'the surface is on by default')
-  checks.push('the local tool surface is on by default')
+  apply(collectorContext(onTools), { token: 'on-token', endpointFile: join(dir, 'on-endpoint.json'), url: 'http://127.0.0.1:9', dshHome: dir })
+  assert.equal(onTools.length, 3, 'the lazy surface is on by default')
+  assert.deepEqual(onTools.map((tool) => tool.name).sort(), ['dsh_mcp_call', 'dsh_mcp_open', 'dsh_mcp_tools'])
+  checks.push('the local surface is on by default, as the three-tool front door')
+
+  // The full surface is the opt-in: the whole table, projected for the registry.
+  const fullTools = []
+  apply(collectorContext(fullTools), { token: 'full-token', endpointFile: join(dir, 'full-endpoint.json'), url: 'http://127.0.0.1:9', dshHome: dir, exposeToDshMode: 'full' })
+  assert.equal(fullTools.length, 17, 'full mode registers the whole table')
+  assert.deepEqual(fullTools.map((tool) => tool.name).sort(), mcpNames)
+  const runPromptTool = fullTools.find((tool) => tool.name === 'dsh_run_prompt')
+  assert.equal(runPromptTool.parameters.properties.prompt.minLength, undefined, 'unsupported keywords must be dropped')
+  assert.deepEqual(runPromptTool.parameters.properties.wait, { type: 'boolean', description: 'Wait for the turn to finish (default true).' })
+  assert.deepEqual(runPromptTool.parameters.required, ['prompt'])
+  assert.equal(runPromptTool.parameters.additionalProperties, false)
+  assert.equal(runPromptTool.output.render(undefined, { answer: 42 })[0].text, '{\n  "answer": 42\n}')
+  assert.equal(runPromptTool.output.render(undefined, 'plain')[0].text, 'plain')
+  checks.push('exposeToDshMode: full registers every published tool, projected for the registry')
+
+  let modeTypo
+  try {
+    apply(collectorContext([]), { token: 'typo-token', endpointFile: join(dir, 'typo-endpoint.json'), dshHome: dir, exposeToDshMode: 'sometimes' })
+  } catch (error) {
+    modeTypo = error
+  }
+  assert.match(String(modeTypo && modeTypo.message), /exposeToDshMode/)
+  checks.push('an unknown surface mode fails at load instead of changing the surface')
 
   const endpoint = JSON.parse(await readFile(endpointFile, 'utf8'))
   assert.equal(endpoint.token, 'integration-token')

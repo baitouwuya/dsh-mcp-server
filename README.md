@@ -151,18 +151,41 @@ of polling `dsh_read_session` in a loop. Only `dsh_cancel_session` stops a turn.
 
 ## DSH-local tools
 
-The endpoint's tools are **also** registered into the running Harness's own tool registry
-(`ctx.tools`), so a DSH agent calls them directly: no second process, no MCP client config, exactly
-like `bash` or `run_code`. On by default; set `exposeToDsh: false` to keep the plugin MCP-only.
+The endpoint's tools are **also** callable from inside the running Harness — no second process, no MCP
+client config. On by default; set `exposeToDsh: false` to keep the plugin MCP-only.
+
+### On demand, not all at once
+
+Seventeen tool schemas are ~16.4 KB (~4k tokens) of permanent prompt cost in **every** session, whether
+that session ever delegates anything or not. So the default surface is a three-tool front door:
+
+| Front-door tool | Purpose |
+|---|---|
+| `dsh_mcp_tools` | The catalogue: one line per published tool, marked `native` when it is already callable. `name` returns that tool's complete parameter schema. |
+| `dsh_mcp_open` | Register the named tools (**or `all: true`) into *this* session**, so they are callable natively from the next step on. |
+| `dsh_mcp_call` | Call one published tool directly, without opening it — for a single call that does not deserve a permanent schema. |
+
+That is ~1.9 KB (~470 tokens) at rest instead of ~16.4 KB, and the rest of the table is paid for only by
+sessions that actually use it. `dsh_status` reports the whole shape:
+`dshTools: { enabled, mode, registered, published, via }`.
+
+### Adding tools mid-session
+
+`dsh_mcp_open` is not a naming trick: DSH supports adding tools while a session runs. The agent loop
+diffs the tool set between requests, appends a `developer/message` carrying `tool-addition` (and
+`tool-removal`) blocks for that `request/header` change, and the provider adapter renders it in the
+form its own `toolUpdate` mode requires (`addition-only` or `in-history`). The registrations
+themselves go into the **calling agent's** scope, so they follow that agent alone and unwind when it is
+disposed — `open` in one session never leaks into another.
+
+Set `exposeToDshMode: "full"` to put the whole table in the prompt at load instead, which is what
+v0.7.0 did.
 
 | Where | What |
 |---|---|
-| Web **Plugins** page → this bundle's row → **Configure** | The switch. It saves through the profile configuration editor, so it lands in `cordis.patch.yml` exactly like a hand edit, and the row reloads. |
-| `GET /mcp-config` (loopback only) | The current state: `exposeToDsh`, the MCP URL, the tool list, the version. |
-| `POST /mcp-config` `{ "exposeToDsh": false }` | The same write the page performs. |
-
-The registered names are the MCP names (`dsh_run_prompt`, `dsh_read_session`, …), so one vocabulary
-covers both surfaces, and `dsh_status` reports `dshTools: { enabled, count, via, names }`.
+| Web **Plugins** page → this bundle's row → **Configure** | The switch and the surface mode. They save through the profile configuration editor, so they land in `cordis.patch.yml` exactly like a hand edit, and the row reloads. |
+| `GET /mcp-config` (loopback only) | The current state: `exposeToDsh`, `exposeToDshMode`, the MCP URL, the published and registered names, the version. |
+| `POST /mcp-config` `{ "exposeToDsh": false }` or `{ "exposeToDshMode": "full" }` | The same writes the page performs. |
 
 Both `dsh_status` and `GET /mcp-config` also report `clientPage: { available, inGraph, bundle }` — the
 Host's browser module registry answering whether this bundle's page is really being served. It stays
@@ -247,7 +270,8 @@ The bundle row in `cordis.patch.yml` accepts (all optional):
 | `restrictToOwner` | `false` | Confine each caller to the sessions it created or adopted: other sessions are refused by id, and `dsh_list_sessions` returns only its own. |
 | `clientsFile` | `$DSH_HOME/mcp/dsh-mcp-clients.json` | Where the caller registry (agents seen + session owners) is kept, mode 0600. |
 | `clientsFlushMs` | `5000` | How long registry writes are coalesced before they hit disk. |
-| `exposeToDsh` | `true` | Register the MCP tools into the local Harness tool registry so a DSH agent calls them directly. `false` keeps the endpoint MCP-only. |
+| `exposeToDsh` | `true` | Expose the MCP tools to DSH itself. `false` keeps the endpoint MCP-only. |
+| `exposeToDshMode` | `lazy` | `lazy` registers the three-tool front door and lets a session open what it needs; `full` registers all seventeen at load (permanent schema cost). An unknown value fails at load. |
 | `exposeToDshPage` | `true` | Serve the loopback configuration route the Web Plugins page's switch reads and writes. |
 | `configPath` | `<path>-config` | Route path of that configuration endpoint (`/mcp-config` by default). |
 | `entryId` | `dsh-mcp-server` | Profile row the configuration page addresses when it saves the switch. |
@@ -373,16 +397,16 @@ private profile, with the token the server is configured with.
 
 ```bash
 node test/mcp-self-test.mjs            # 11 transport checks, no Harness needed
-node test/client-half-test.mjs         # 7 checks: the browser half's row page and its read/write route
-node test/plugin-integration-test.mjs  # 85 checks: apply(), endpoint file + advertised URL, tools,
+node test/client-half-test.mjs         # 8 checks: the browser half's row page and its read/write route
+node test/plugin-integration-test.mjs  # 90 checks: apply(), endpoint file + advertised URL, tools,
                                        # transcript windows, outline/paging/truncation, search, index
                                        # cursors, pending user decisions (PTC included), parked approvals
                                        # and questions answered over MCP, waiting, caller identity +
                                        # restrictToOwner, archival tools, permissions, commands, model
-                                       # pinning, hot-reload ownership, the DSH-facing tool surface, its
-                                       # authority ceiling, and the configuration route
+                                       # pinning, hot-reload ownership, the on-demand DSH surface (catalogue,
+                                       # open, dispatch), its authority ceiling, and the configuration route
 node test/stdio-bridge-test.mjs        # 4 checks, needs a RUNNING Harness (one real delegated turn)
-node test/live-e2e-test.mjs            # 43 checks over HTTP: protocol, resources, all seventeen tools,
+node test/live-e2e-test.mjs            # 44 checks over HTTP: protocol, resources, all seventeen tools,
                                        # archive/unarchive, permission presets, commands, error paths,
                                        # 4 real turns (needs a Harness)
 ```
@@ -429,6 +453,9 @@ and the stdio bridge.
 - **Adding the browser half needs a restart.** The Host half's tools land when the row reloads, but
   the Web client graph is composed at boot, so a new `lib/client.js` or `dsh.client` declaration shows
   its **Configure** page only after restarting DSH.
+- **Opened tools stay open for the session.** `dsh_mcp_open` registers into the calling agent's scope and
+  nothing removes them before the agent is disposed, so a session that opens everything keeps paying for
+  it. Open the few tools a task needs; use `dsh_mcp_call` for one-offs.
 - Sessions started over MCP are ordinary DSH sessions: they appear in the Harness session list and can
   be opened and continued in the GUI.
 

@@ -25,7 +25,7 @@ import { McpGateway, SERVER_NAME } from './lib/protocol.js'
 import { registerDshTools } from './lib/dsh-tools-bridge.js'
 
 /** Keep in sync with package.json; reported through `initialize`. */
-const VERSION = '0.7.0'
+const VERSION = '0.8.0'
 
 /** This package's own name, as the profile's bundle row spells it. */
 const PACKAGE_NAME = (() => {
@@ -128,6 +128,19 @@ export function apply(ctx, config = {}) {
   // MCP-only (the settings page and this row both switch it).
   const exposeToDsh = config.exposeToDsh !== false
   const exposeToDshPage = config.exposeToDshPage !== false
+  /**
+   * How much of the tool table DSH sees at rest.
+   *
+   * `lazy` (the default) registers a three-tool front door and lets a session
+   * open what it needs; `full` registers all of it up front. A typo fails at
+   * load instead of silently changing what every session pays for.
+   */
+  const exposeToDshMode = (() => {
+    const raw = config.exposeToDshMode
+    if (raw === undefined || raw === null || raw === '') return 'lazy'
+    if (raw === 'lazy' || raw === 'full') return raw
+    throw new Error(`dsh-mcp-server: "exposeToDshMode" must be "lazy" or "full" (got ${String(raw)}).`)
+  })()
   const entryId = typeof config.entryId === 'string' && config.entryId ? config.entryId : name
   const configPath = typeof config.configPath === 'string' && config.configPath
     ? resolvePath({ path: config.configPath })
@@ -204,12 +217,13 @@ export function apply(ctx, config = {}) {
   /** Identity of this activation; a dispose only removes the endpoint file this activation wrote. */
   const instanceId = randomUUID()
   /** What the DSH-facing tool surface looks like right now, for `dsh_status` and the settings page. */
-  const dshToolsState = { names: [], via: undefined }
+  const dshToolsState = { names: [], published: [], via: undefined }
   const dshTools = () => ({
     enabled: exposeToDsh,
-    count: dshToolsState.names.length,
+    mode: exposeToDshMode,
+    registered: dshToolsState.names,
+    published: dshToolsState.published.length,
     ...(dshToolsState.via ? { via: dshToolsState.via } : {}),
-    names: dshToolsState.names,
   })
 
   const capabilities = createDshCapabilities(ctx, {
@@ -231,11 +245,13 @@ export function apply(ctx, config = {}) {
     clientPage: clientPageState,
   })
 
-  // Register the same tool table into the local Harness, so a DSH agent calls
-  // these directly; an internal caller is clamped to its own authority by
-  // `lib/dsh-capabilities.js`, never the endpoint's or the deployment's.
+  dshToolsState.published = capabilities.tools.map((tool) => tool.name)
+
+  // Register the DSH-facing surface, so a DSH agent calls these directly; an
+  // internal caller is clamped to its own authority by `lib/dsh-capabilities.js`,
+  // never the endpoint's or the deployment's.
   if (exposeToDsh) {
-    const registered = registerDshTools({ ctx, capabilities, logger: log })
+    const registered = registerDshTools({ ctx, capabilities, logger: log, mode: exposeToDshMode })
     dshToolsState.names = registered.names
     dshToolsState.via = registered.via
   }
@@ -318,24 +334,25 @@ export function apply(ctx, config = {}) {
       version: VERSION,
       entryId,
       exposeToDsh,
+      exposeToDshMode,
       mcpPath: path,
       configPath,
-      tools: capabilities.tools.map((tool) => tool.name),
-      registered: dshToolsState.names.length,
+      published: dshToolsState.published,
+      registered: dshToolsState.names,
       url: `${resolveBaseUrl()}${path}`,
       clientPage: clientPageState(),
     }
   }
 
   /**
-   * Save the switch through the Harness configuration editor, so the profile's
-   * `cordis.patch.yml` stays the one source of truth and the row reloads exactly
-   * as a hand edit would.
+   * Save one validated patch through the Harness configuration editor, so the
+   * profile's `cordis.patch.yml` stays the one source of truth and the row
+   * reloads exactly as a hand edit would.
    */
-  async function writeExposeToDsh(next) {
+  async function writeDshSurface(patch) {
     const editor = ctx.get('configEditor')
     if (typeof editor?.entries !== 'function' || typeof editor.edit !== 'function') {
-      throw new Error('This Harness exposes no profile configuration editor, so the switch cannot be saved here. Set "exposeToDsh" on the dsh-mcp-server row in cordis.patch.yml and restart DSH.')
+      throw new Error('This Harness exposes no profile configuration editor, so this setting cannot be saved here. Set it on the dsh-mcp-server row in cordis.patch.yml and restart DSH.')
     }
     const rows = [...(editor.entries() ?? [])]
     const entry = rows.find((row) => row?.options?.name === PACKAGE_NAME)
@@ -345,15 +362,15 @@ export function apply(ctx, config = {}) {
       const seen = rows.map((row) => row?.options?.id).filter(Boolean).join(', ')
       throw new Error(`The "${entryId}" row is not addressable in this profile's patch (saw: ${seen || 'no rows'}), so the switch cannot be saved here. Edit cordis.patch.yml directly.`)
     }
-    await editor.edit(entry, (current) => ({ ...(current && typeof current === 'object' ? current : {}), exposeToDsh: next }))
-    return next
+    await editor.edit(entry, (current) => ({ ...(current && typeof current === 'object' ? current : {}), ...patch }))
+    return patch
   }
 
   const disposeConfigRoute = exposeToDshPage
     ? ctx.webServer.register({
       kind: 'exact',
       path: configPath,
-      handler: createConfigHandler({ snapshot: configSnapshot, write: writeExposeToDsh, logger: log }),
+      handler: createConfigHandler({ snapshot: configSnapshot, write: writeDshSurface, logger: log }),
     })
     : undefined
 
@@ -475,6 +492,7 @@ export function apply(ctx, config = {}) {
     auth: configuredToken ? 'configured bearer token' : 'generated bearer token',
     tools: capabilities.tools.length,
     exposeToDsh,
+    exposeToDshMode,
     dshTools: dshToolsState.names.length,
     clientPage: clientPageState(),
     configPath: exposeToDshPage ? configPath : undefined,

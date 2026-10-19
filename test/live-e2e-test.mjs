@@ -134,18 +134,22 @@ oh('dsh_status reports the endpoint, counts, default model, and tool names')
 // The same table is registered into the local Harness — the surface the
 // Plugins page's switch controls — and the configuration route is what that
 // page reads and writes.
-assert.equal(status.dshTools?.enabled, true, 'the local tool surface is on by default')
-assert.equal(status.dshTools?.count, EXPECTED_TOOLS.length)
-oh('dsh_status reports the local tool surface and its size')
+assert.equal(status.dshTools?.enabled, true, 'the local surface is on by default')
+assert.equal(status.dshTools?.mode, 'lazy', 'the default surface is on demand')
+assert.equal(status.dshTools?.published, EXPECTED_TOOLS.length)
+assert.deepEqual([...status.dshTools.registered].sort(), ['dsh_mcp_call', 'dsh_mcp_open', 'dsh_mcp_tools'])
+oh('dsh_status reports the on-demand surface, its size, and its front door')
 
 const configUrl = `${url.replace(/\/mcp$/, '')}/mcp-config`
 const configResponse = await fetch(configUrl, { headers: { accept: 'application/json' } })
 assert.equal(configResponse.status, 200, `the configuration route must answer: ${configResponse.status}`)
 const configBody = await configResponse.json()
 assert.equal(configBody.exposeToDsh, true)
+assert.equal(configBody.exposeToDshMode, 'lazy')
 assert.equal(configBody.configPath, '/mcp-config')
-assert.ok(Array.isArray(configBody.tools) && configBody.tools.length === EXPECTED_TOOLS.length)
-oh('the configuration route serves the switch the Plugins page writes')
+assert.ok(Array.isArray(configBody.published) && configBody.published.length === EXPECTED_TOOLS.length)
+assert.deepEqual([...configBody.registered].sort(), ['dsh_mcp_call', 'dsh_mcp_open', 'dsh_mcp_tools'])
+oh('the configuration route serves the surface the Plugins page reads')
 
 // The browser half is what draws the row's Configure page, so the Host's own
 // module registry is the authoritative answer that it is being served.
