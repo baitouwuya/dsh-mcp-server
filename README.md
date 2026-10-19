@@ -496,7 +496,7 @@ node test/plugin-integration-test.mjs  # 108 checks: apply(), endpoint file + ad
                                        # open, dispatch), its authority ceiling, the configuration route,
                                        # sidebar grouping, delivery mode, sender attribution, lossless values
 node test/stdio-bridge-test.mjs        # 4 checks, needs a RUNNING Harness (one real delegated turn)
-node test/live-e2e-test.mjs            # 47 checks over HTTP: protocol, resources, all eighteen tools,
+node test/live-e2e-test.mjs            # 46 checks over HTTP: protocol, resources, all eighteen tools,
                                        # archive/unarchive, permission presets, commands, error paths,
                                        # 4 real turns (needs a Harness)
 ```
