@@ -282,6 +282,7 @@ function makeServices() {
             blank: false,
             agentAvailable: true,
             cwd: entry.cwd ?? '/tmp',
+            ...(entry.parentSessionId ? { parentSessionId: entry.parentSessionId } : {}),
           })),
         ],
       }
@@ -1618,6 +1619,50 @@ try {
   assert.ok(endpoint.stdioBridge.endsWith('/bin/dsh-mcp-stdio.mjs'), `unexpected stdioBridge path: ${endpoint.stdioBridge}`)
   assert.ok(!endpoint.stdioBridge.includes('/bin/bin/'))
   checks.push('the published endpoint file carries the exact stdio bridge path')
+
+  // --- task-start work sync ----------------------------------------------------
+  // One question per top-level agent, same workspace only, and the asker never
+  // waits for the answer.
+  const syncHandler = ctx.hooks.get('session/event')
+  assert.equal(typeof syncHandler, 'function', 'the plugin subscribes to session events for work sync')
+  addSyntheticSessions([
+    { sessionId: 'session-sync-asker', running: true, cwd: '/tmp/sync-ws' },
+    { sessionId: 'session-sync-peer', running: true, cwd: '/tmp/sync-ws' },
+    { sessionId: 'session-sync-child', running: true, cwd: '/tmp/sync-ws', parentSessionId: 'session-sync-asker' },
+    { sessionId: 'session-sync-elsewhere', running: true, cwd: '/tmp/other-ws' },
+  ])
+  const syncTick = () => new Promise((resolve) => setTimeout(resolve, 40))
+  const messagesTo = (id) => injectedMessages().filter((row) => row.sessionId === id)
+  const asker = { id: 'session-sync-asker', header: { id: 'session-sync-asker', cwd: '/tmp/sync-ws' } }
+  syncHandler(asker, { type: 'turn/start', data: { turn: 1 } })
+  await syncTick()
+  const notices = messagesTo('session-sync-peer')
+  assert.equal(notices.length, 1, 'a starting task asks the other running agent in this workspace exactly once')
+  assert.match(notices[0].message.content[0].text, /进度同步/)
+  assert.equal(notices[0].message.source.kind, 'dsh-mcp-server')
+  assert.equal(notices[0].message.source.sessionId, 'session-sync-asker', 'the notice names the session it came from')
+  assert.equal(messagesTo('session-sync-child').length, 0, 'a sub-agent is never questioned directly')
+  assert.equal(messagesTo('session-sync-elsewhere').length, 0, 'another workspace is never asked')
+  checks.push('work sync asks one question per top-level agent, and only inside this workspace')
+
+  // The turn a notice causes is not a task start, so a peer answering cannot ask back.
+  const totalBefore = injectedMessages().length
+  syncHandler({ id: 'session-sync-peer', header: { id: 'session-sync-peer', cwd: '/tmp/sync-ws' } }, { type: 'turn/start', data: { turn: 1 } })
+  await syncTick()
+  assert.equal(injectedMessages().length, totalBefore, 'the turn a notice caused starts no round of its own')
+  checks.push('a notice never triggers another notice')
+
+  // The answer comes back to the asker, attributed to the session that sent it.
+  syncHandler(
+    { id: 'session-sync-peer' },
+    { type: 'assistant/message', data: { message: { role: 'assistant', content: [{ type: 'text', text: '我在改 lib/x.js，排在你的改动之前' }] } } },
+  )
+  await syncTick()
+  const reports = messagesTo('session-sync-asker')
+  assert.equal(reports.length, 1, 'the peer answer reaches the asking session')
+  assert.match(reports[0].message.content[0].text, /lib\/x\.js/)
+  assert.equal(reports[0].message.source.sessionId, 'session-sync-peer')
+  checks.push('the peer answer reaches the asker, labelled with the session that sent it')
 
   for (const dispose of disposers) await dispose?.()
   assert.equal(webServer.registered.length, 0, 'disposal removes the routes')

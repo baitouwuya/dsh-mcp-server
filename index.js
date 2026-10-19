@@ -23,6 +23,7 @@ import { createConfigHandler } from './lib/config-route.js'
 import { createMcpHttpHandler } from './lib/http-route.js'
 import { McpGateway, SERVER_NAME } from './lib/protocol.js'
 import { registerDshTools } from './lib/dsh-tools-bridge.js'
+import { createWorkSync } from './lib/work-sync.js'
 import { groupOwnedSessions } from './lib/workspace-grouping.js'
 
 /** Keep in sync with package.json; reported through `initialize`. */
@@ -154,6 +155,23 @@ export function apply(ctx, config = {}) {
    */
   const createGroups = config.createGroups === true
   /**
+   * Sync a starting task with the other agents working in the same workspace.
+   *
+   * On by default: two sessions editing one tree is exactly the collision this
+   * avoids, and a deployment running one agent at a time pays nothing for it —
+   * no running peer in this workspace means no notice is ever sent.
+   */
+  const syncOnStart = config.syncOnStart !== false
+  const syncCooldownMs = Number.isFinite(Number(config.syncCooldownMs))
+    ? Math.max(0, Number(config.syncCooldownMs))
+    : 300_000
+  const syncWaitMs = Number.isFinite(Number(config.syncWaitMs))
+    ? Math.max(1000, Number(config.syncWaitMs))
+    : 120_000
+  const syncMaxPeers = Number.isFinite(Number(config.syncMaxPeers))
+    ? Math.max(1, Math.min(20, Number(config.syncMaxPeers)))
+    : 3
+  /**
    * How a prompt is delivered to a session that is already running.
    *
    * `setting` (the default) follows this deployment's own `ui-conversation.busyEnter`,
@@ -252,6 +270,9 @@ export function apply(ctx, config = {}) {
     ...(dshToolsState.via ? { via: dshToolsState.via } : {}),
   })
 
+  /** Live work-sync state; the engine replaces this once it is built below. */
+  let workSyncStatus = () => ({ enabled: syncOnStart })
+
   const capabilities = createDshCapabilities(ctx, {
     logger: log,
     sessionOwners: clients,
@@ -273,6 +294,7 @@ export function apply(ctx, config = {}) {
     createGroups,
     busyMode,
     openSession: queueOpenSession,
+    syncStatus: () => workSyncStatus(),
   })
 
   dshToolsState.published = capabilities.tools.map((tool) => tool.name)
@@ -285,6 +307,54 @@ export function apply(ctx, config = {}) {
     dshToolsState.names = registered.names
     dshToolsState.via = registered.via
   }
+
+  /** The prose of one assistant message event, or nothing when it carries none. */
+  function assistantTextOf(event) {
+    const content = Array.isArray(event?.data?.message?.content) ? event.data.message.content : []
+    const text = content
+      .filter((block) => block?.type === 'text' && typeof block.text === 'string')
+      .map((block) => block.text)
+      .join('\n')
+      .trim()
+    return text ? text : undefined
+  }
+
+  /**
+   * The session rows work-sync reasons about: who is running, in which
+   * workspace, and under which top-level agent.
+   */
+  async function syncSessionRows() {
+    const controller = ctx.get('sessionController')
+    if (typeof controller?.list !== 'function') return []
+    const listed = await controller.list({})
+    const items = Array.isArray(listed?.items) ? listed.items : []
+    return items.map((item) => ({
+      sessionId: item.sessionId,
+      running: item.running === true,
+      ...(typeof item.cwd === 'string' ? { cwd: item.cwd } : {}),
+      ...(Number.isFinite(Number(item.updatedAt)) ? { updatedAt: Number(item.updatedAt) } : {}),
+      ...(typeof item.parentSessionId === 'string' ? { parentSessionId: item.parentSessionId } : {}),
+    }))
+  }
+
+  /**
+   * Ask the other top-level agents in this workspace what they are touching,
+   * without ever waiting for the answer.
+   */
+  const workSync = createWorkSync({
+    ctx,
+    settings: { enabled: syncOnStart, cooldownMs: syncCooldownMs, waitMs: syncWaitMs, maxPeers: syncMaxPeers },
+    logger: log,
+    listSessions: syncSessionRows,
+    deliver: (sessionId, message) => capabilities.deliverInternalMessage(sessionId, message?.text, message?.meta),
+    readAssistant: assistantTextOf,
+    now: () => Date.now(),
+  })
+  workSyncStatus = () => workSync.status()
+  ctx.effect(() => {
+    workSync.start()
+    return () => workSync.dispose()
+  }, 'dsh-mcp-server: task-start work sync')
 
   const gateway = new McpGateway({
     serverInfo: { name: SERVER_NAME, title: 'DeepSeek Harness MCP Server', version: VERSION },
@@ -372,6 +442,17 @@ export function apply(ctx, config = {}) {
       groupSessions,
       createGroups,
       busyMode,
+      syncOnStart,
+      syncCooldownMs,
+      syncWaitMs,
+      syncMaxPeers,
+      sync: (() => {
+        try {
+          return workSyncStatus()
+        } catch {
+          return { enabled: syncOnStart }
+        }
+      })(),
       url: `${resolveBaseUrl()}${path}`,
       clientPage: clientPageState(),
       // What "follow the setting" currently resolves to, so the page can show it.

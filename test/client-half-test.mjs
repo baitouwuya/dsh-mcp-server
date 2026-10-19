@@ -94,7 +94,7 @@ const collectText = (node) => {
   return collectText(node.children)
 }
 const labels = collectText(panelPage({ view: 'page' }).type(panelPage({ view: 'page' }).props))
-for (const expected of ['Surface', 'On demand', 'All at once', 'Sidebar projects', 'Join an existing project', 'May create projects', 'Delivery while busy', 'Follow the setting', 'Queue', 'Steer']) {
+for (const expected of ['Surface', 'On demand', 'All at once', 'Sidebar projects', 'Join an existing project', 'May create projects', 'Delivery while busy', 'Follow the setting', 'Queue', 'Steer', 'Sync progress when a task starts']) {
   assert.ok(labels.includes(expected), `the settings page must offer "${expected}"`)
 }
 checks.push('the settings page renders every control it offers')

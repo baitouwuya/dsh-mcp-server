@@ -286,6 +286,28 @@ hide a nested `undefined`: one unset field anywhere in a payload fails the whole
 `value is not lossless JSON`. The DSH-facing surface projects every result through
 `JSON.parse(JSON.stringify(...))` before returning it, so an unset field can only ever disappear.
 
+## Task-start progress sync
+
+Two agents editing one tree is how work gets lost, so a session starting a task first asks the other
+agents working in the **same workspace** what they are doing and which files they are touching.
+
+- **One question per top-level agent.** The asker resolves each peer's top-level (root) session and asks
+  only that one; a root answers on behalf of its whole subtree. A sub-agent never questions peers — it asks
+  its own top-level agent, because that is the only place its answer can come from.
+- **Same workspace only.** A peer whose recorded `cwd` differs is never asked and never negotiated with.
+  That is not configurable: crossing workspaces cannot prevent a collision.
+- **The asker does not wait.** It keeps thinking. When the peer answers — its next assistant message — the
+  text reaches the asker as a message labelled with the session that sent it, telling it to adjust its order
+  and, if the work is duplicate or conflicting, to negotiate with that peer before continuing.
+- **A notice never begets a notice.** The turn a notice or report starts is recognised and skipped, one
+  question per pair at a time, and the same peer is not asked twice inside the cooldown. A peer that never
+  answers produces exactly one line, not a stream.
+
+On by default: a deployment running one agent at a time pays nothing, because no notice is ever sent when
+no peer is running. `syncOnStart: false` turns it off; the switch is on the Plugins page. The advanced knobs
+are configuration-only (`syncCooldownMs`, `syncWaitMs`, `syncMaxPeers`). `dsh_status` reports
+`sync: { enabled, peersAsked, pending, reports }`, and `GET /mcp-config` reports the switch itself.
+
 ## Point the GUI at a session
 
 `dsh_open_session({ sessionId })` asks whichever Harness page is open to open that session and select it
@@ -315,6 +337,7 @@ none of them needs a YAML edit:
 | Surface: on demand / all at once | `exposeToDshMode` |
 | Sidebar projects: join / may create | `groupSessions`, `createGroups` |
 | Delivery while busy: follow the setting / queue / steer | `busyMode` (with the value the setting currently resolves to) |
+| Task-start progress sync: on / off | `syncOnStart` |
 
 Each control saves through the profile configuration editor and reloads this plugin's row, exactly as a
 hand edit would.
@@ -383,6 +406,10 @@ The bundle row in `cordis.patch.yml` accepts (all optional):
 | `groupSessions` | `true` | Attach the Sessions this endpoint starts to the project their directory **already** has, and, once and in the background, restore the Sessions earlier builds left in "Ungrouped". |
 | `createGroups` | `false` | Let this endpoint invent a sidebar project for a directory that has none. Off by default: automation does not grow the sidebar on its own, and a Session whose directory has no project stays in Ungrouped. |
 | `busyMode` | `setting` | Delivery to a session that is already running: `setting` follows the deployment's own `ui-conversation.busyEnter`, `queue` always waits for the next turn, `steer` always injects mid-turn. A caller's `mode` argument wins over all three. |
+| `syncOnStart` | `true` | When a task starts, ask the other agents working in the **same workspace** what they are doing and which files they are touching. On by default; the Plugins page switches it. |
+| `syncCooldownMs` | `300000` | How long one session waits before asking the same peer again. |
+| `syncWaitMs` | `120000` | How long a peer's report is awaited before the asker is told it is still working. |
+| `syncMaxPeers` | `3` | How many peers one round may ask. |
 | `maxBodyBytes` | `8388608` | Request body ceiling. |
 | `instructions` | built-in text | Replaces the instructions handed to the calling model. |
 
@@ -505,8 +532,9 @@ private profile, with the token the server is configured with.
 
 ```bash
 node test/mcp-self-test.mjs            # 11 transport checks, no Harness needed
+node test/work-sync-test.mjs           # 7 checks: the progress-sync engine against a fake Harness
 node test/client-half-test.mjs         # 11 checks: the browser half's row page, its settings, its route
-node test/plugin-integration-test.mjs  # 112 checks: apply(), endpoint file + advertised URL, tools,
+node test/plugin-integration-test.mjs  # 115 checks: apply(), endpoint file + advertised URL, tools,
                                        # transcript windows, outline/paging/truncation, search, index
                                        # cursors, pending user decisions (PTC included), parked approvals
                                        # and questions answered over MCP, waiting, caller identity +
