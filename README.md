@@ -90,7 +90,9 @@ audit events out of the session log — `{ sessionId }` for one session, or a sc
 reason, call id and seq. `includeSettled: true` also reports how earlier decisions resolved
 (`allowed-once`, `rejected`, `cancelled`, `unavailable`).
 
-Reads and waits surface the same state as a compact `pending` summary, so a `timedOut` wait no longer
+A question a PTC agent dispatches for itself (from inside `run_code`) is folded from its dispatch-start
+event, which is the only durable trace while the tool blocks the turn, and closes when that dispatch
+settles. Reads and waits surface the same state as a compact `pending` summary, so a `timedOut` wait no longer
 leaves the caller guessing.
 
 By default this is **reporting only** — the decision is granted in the Harness GUI. With
@@ -321,11 +323,12 @@ private profile, with the token the server is configured with.
 
 ```bash
 node test/mcp-self-test.mjs            # 11 transport checks, no Harness needed
-node test/plugin-integration-test.mjs  # 67 checks: apply(), endpoint file, tools, transcript windows,
-                                       # outline/paging/truncation, search, index cursors, pending user
-                                       # decisions, parked approvals/questions answered over MCP, waiting,
-                                       # caller identity + restrictToOwner, archival tools, permissions,
-                                       # commands, model pinning, hot-reload ownership
+node test/plugin-integration-test.mjs  # 70 checks: apply(), endpoint file + advertised URL, tools,
+                                       # transcript windows, outline/paging/truncation, search, index
+                                       # cursors, pending user decisions (PTC included), parked approvals
+                                       # and questions answered over MCP, waiting, caller identity +
+                                       # restrictToOwner, archival tools, permissions, commands, model
+                                       # pinning, hot-reload ownership
 node test/stdio-bridge-test.mjs        # 4 checks, needs a RUNNING Harness (one real delegated turn)
 node test/live-e2e-test.mjs            # 41 checks over HTTP: protocol, resources, all seventeen tools,
                                        # archive/unarchive, permission presets, commands, error paths,
@@ -340,6 +343,11 @@ over the header and User-Agent rungs, windowed/outlined transcript reads, detach
 and the stdio bridge.
 
 ## Notes and limitations
+
+- **The advertised URL is the listener's own.** The row's `url` and `DSH_WEB_URL` still win, but with
+  neither set the endpoint file follows `ctx.webServer` (`protocol`/`host`/`port`) once the app is ready,
+  so a Harness whose GUI port is OS-assigned no longer publishes a dead `19387` URL to stdio bridges and
+  other clients.
 
 - **Code changes need a Harness restart.** Re-enabling a bundle reloads its row but reuses the
   already-imported module generation, so edited plugin code only takes effect after restarting DSH.

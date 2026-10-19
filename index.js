@@ -23,7 +23,7 @@ import { createMcpHttpHandler } from './lib/http-route.js'
 import { McpGateway, SERVER_NAME } from './lib/protocol.js'
 
 /** Keep in sync with package.json; reported through `initialize`. */
-const VERSION = '0.6.0'
+const VERSION = '0.6.1'
 
 /** Cordis: wait for the Web carrier before registering the route. */
 export const inject = ['webServer']
@@ -130,13 +130,38 @@ export function apply(ctx, config = {}) {
   const token = configuredToken ?? randomBytes(32).toString('base64url')
   const generatedToken = configuredToken === undefined
 
-  const baseUrl = (() => {
+  /** A host the listener bound to, spelled as a URL authority. */
+  const authorityOf = (host, port) => {
+    const spelling = typeof host === 'string' && host ? host : '127.0.0.1'
+    const wildcard = spelling === '0.0.0.0' || spelling === '::' || spelling === '*'
+    const chosen = wildcard ? '127.0.0.1' : spelling
+    const bracketed = chosen.includes(':') && !chosen.startsWith('[') ? `[${chosen}]` : chosen
+    return `${bracketed}:${port}`
+  }
+
+  /**
+   * Where this endpoint is reachable.
+   *
+   * The listener is usually bound after this plugin applies, and its port is often
+   * OS-assigned (`port: 0`), so the configured URL and `DSH_WEB_URL` come first and
+   * the running `webServer` — its own `protocol`/`host`/`port` — is the authoritative
+   * fallback. The static default is only a last resort for embedded hosts.
+   */
+  const resolveBaseUrl = () => {
     if (typeof config.url === 'string' && config.url) return config.url.replace(/\/$/, '')
     const fromEnv = process.env.DSH_WEB_URL
     if (fromEnv) return fromEnv.replace(/\/$/, '')
+    const carrier = ctx.get('webServer')
+    const port = Number(carrier?.port)
+    if (Number.isFinite(port) && port > 0) {
+      const protocol = typeof carrier?.protocol === 'string' && carrier.protocol.endsWith(':')
+        ? carrier.protocol
+        : 'http:'
+      return `${protocol}//${authorityOf(carrier?.host, port)}`
+    }
     return 'http://127.0.0.1:19387'
-  })()
-  const endpointUrl = `${baseUrl}${path}`
+  }
+  const endpointUrl = `${resolveBaseUrl()}${path}`
 
   /** Default model for newly started sessions; a continued session keeps its own model. */
   const defaultModel = (() => {
@@ -223,8 +248,9 @@ export function apply(ctx, config = {}) {
   /** Publish connection details so stdio bridges and humans can find the endpoint. */
   async function publishEndpoint() {
     if (!writeEndpointFile) return
+    const url = `${resolveBaseUrl()}${path}`
     const payload = {
-      url: endpointUrl,
+      url,
       token,
       path,
       pid: process.pid,
@@ -240,7 +266,7 @@ export function apply(ctx, config = {}) {
     try {
       await mkdir(dirname(endpointFile), { recursive: true, mode: 0o700 })
       await writeFile(endpointFile, JSON.stringify(payload, null, 2) + '\n', { mode: 0o600 })
-      log('info', 'endpoint published', { url: endpointUrl, endpointFile })
+      log('info', 'endpoint published', { url, endpointFile })
     } catch (error) {
       log('warn', 'could not publish endpoint file', {
         endpointFile,
@@ -250,6 +276,44 @@ export function apply(ctx, config = {}) {
   }
 
   void publishEndpoint()
+
+  /**
+   * Publish again once the listener has a port.
+   *
+   * `ctx.webServer.port` is undefined until the listener binds, which happens after
+   * this plugin applies — so the first publish can only advertise the configured or
+   * default URL. Waiting for `appReady` (the launch signal other web plugins use)
+   * turns that into the real address, which is what external harnesses connect to.
+   */
+  function republishWhenListening() {
+    if (!writeEndpointFile) return
+    if (Number.isFinite(Number(ctx.get('webServer')?.port))) {
+      void publishEndpoint()
+      return
+    }
+    const ready = ctx.get('appReady')
+    if (ready && typeof ready.onReady === 'function') {
+      ctx.effect(() => {
+        let closed = false
+        const cancel = ready.onReady(() => { if (!closed) void publishEndpoint() })
+        return () => { closed = true; cancel?.() }
+      }, 'dsh-mcp-server: republish endpoint once listening')
+      return
+    }
+    let attempts = 0
+    const timer = setInterval(() => {
+      attempts += 1
+      if (Number.isFinite(Number(ctx.get('webServer')?.port))) {
+        clearInterval(timer)
+        void publishEndpoint()
+      } else if (attempts >= 100) {
+        clearInterval(timer)
+      }
+    }, 100)
+    timer.unref?.()
+  }
+
+  republishWhenListening()
 
   /**
    * Remove the published endpoint file, but only while this activation still owns

@@ -738,6 +738,27 @@ try {
   assert.deepEqual(await questionOutcome, { answers: [{ id: 'q-ship', selected: ['yes'] }] })
   checks.push('dsh_answer_request answers a parked question in service vocabulary')
 
+  // A plain blocking question carries no wait.callId: the parked id must be the durable
+  // sub-call id so dsh_list_requests and dsh_answer_request agree.
+  responder.seedEvents([
+    { type: 'tool/ptc-dispatch-start', data: { name: 'ask_user_question', subCallId: 'call-q-block:ptc:1', arguments: { questions: [{ id: 'q-block', question: 'Blocked?' }] } } },
+  ])
+  const blockingQuestion = responderHooks.get('user-questions/request')(
+    { agent: { session: { id: ownedSession } }, questions: [{ id: 'q-block', question: 'Blocked?' }] },
+    async () => { throw new Error('no user-questions answerer accepted the request') },
+  )
+  await new Promise((resolve) => setTimeout(resolve, 30))
+  const blockingListing = await responderCall('dsh_list_requests', { sessionId: ownedSession })
+  const blockingRow = blockingListing.result.structuredContent.sessions[0].pending.questions.find((row) => row.callId === 'call-q-block:ptc:1')
+  assert.equal(blockingRow?.answerable, true, 'a blocking question must be parked under its durable id')
+  const blockingAnswer = await responderCall('dsh_answer_request', {
+    requestId: 'call-q-block:ptc:1',
+    answers: [{ id: 'q-block', selected: ['ok'] }],
+  })
+  assert.deepEqual(blockingAnswer.result.structuredContent.answers, [{ id: 'q-block', selected: ['ok'] }])
+  assert.deepEqual(await blockingQuestion, { answers: [{ id: 'q-block', selected: ['ok'] }] })
+  checks.push('a blocking question is parked under the id the listing reports')
+
   const missing = await responderCall('dsh_answer_request', { requestId: 'audit-1', decision: 'allow' })
   assert.ok(missing.result.isError, 'an already settled id cannot be answered twice')
   assert.match(missing.result.content[0].text, /dsh_list_requests/)
@@ -867,6 +888,26 @@ try {
   assert.deepEqual(requests.sessions[0].settled.questions.map((row) => row.callId), ['call-q2'])
   checks.push('dsh_list_requests folds pending approvals and questions, and settled ones on request')
 
+  // A PTC agent dispatches the tool itself: the start event is the only trace while
+  // the question blocks the turn, and the dispatch closes it.
+  seedEvents([
+    { type: 'tool/ptc-dispatch-start', data: { name: 'ask_user_question', subCallId: 'call-q3:ptc:1', arguments: { questions: [{ id: 'q3', question: 'Blocked?' }] } } },
+  ])
+  const blocked = await call('dsh_list_requests', { sessionId: created.sessionId }, codex)
+  const blockedRow = blocked.sessions[0].pending.questions.find((row) => row.callId === 'call-q3:ptc:1')
+  assert.equal(blockedRow?.state, 'open')
+  assert.equal(blockedRow?.questions[0].question, 'Blocked?')
+  seedEvents([
+    { type: 'tool/ptc-dispatch', data: { name: 'ask_user_question', subCallId: 'call-q3:ptc:1', isError: true, content: [{ type: 'text', text: 'Error: aborted' }] } },
+  ])
+  const settledBlocked = await call('dsh_list_requests', { sessionId: created.sessionId }, codex)
+  assert.equal(
+    settledBlocked.sessions[0].pending.questions.some((row) => row.callId === 'call-q3:ptc:1'),
+    false,
+    'a settled dispatch must close the question',
+  )
+  checks.push('a PTC-dispatched question is visible while it blocks the turn, and closes when it settles')
+
   const pendingRead = await call('dsh_read_session', { sessionId: created.sessionId, mode: 'outline', limit: 3 }, codex)
   assert.equal(pendingRead.pending.count, 2)
   assert.equal(pendingRead.pending.approvals[0].id, 'app-open')
@@ -976,6 +1017,32 @@ try {
   for (const dispose of newB) await dispose?.()
   await rm(reloadDirB, { recursive: true, force: true })
   checks.push('a reload that applies first keeps the endpoint file when the old activation disposes')
+
+  // --- the advertised URL follows the listener --------------------------------
+  const urlDir = await mkdtemp(join(tmpdir(), 'dsh-mcp-url-'))
+  const urlFile = join(urlDir, 'dsh-mcp-endpoint.json')
+  let readyCallback
+  const carrier = { registered: [], register(route) { this.registered.push(route); return () => {} }, port: undefined, host: '0.0.0.0', protocol: 'http:' }
+  const appReady = { onReady(callback) { readyCallback = callback; return () => { readyCallback = undefined } } }
+  const urlDisposers = []
+  // Neutralize the ambient override so the test exercises the listener fallback itself.
+  const ambientUrl = process.env.DSH_WEB_URL
+  delete process.env.DSH_WEB_URL
+  apply(makeContext({ webServer: carrier, appReady }, urlDisposers), { token: 'url-token', endpointFile: urlFile, url: '', dshHome: urlDir })
+  await new Promise((resolve) => setTimeout(resolve, 60))
+  const boundLater = JSON.parse(await readFile(urlFile, 'utf8'))
+  assert.equal(boundLater.url, 'http://127.0.0.1:19387/mcp', 'an unbound listener can only advertise the documented default')
+  assert.equal(typeof readyCallback, 'function', 'the plugin must wait for the launch signal, not guess')
+  carrier.port = 41234
+  readyCallback()
+  await new Promise((resolve) => setTimeout(resolve, 80))
+  const bound = JSON.parse(await readFile(urlFile, 'utf8'))
+  assert.equal(bound.url, 'http://127.0.0.1:41234/mcp', 'a wildcard bind is advertised as loopback with the real port')
+  assert.equal(bound.instanceId, boundLater.instanceId)
+  checks.push('the advertised URL follows the listener port once the app is ready')
+  if (ambientUrl !== undefined) process.env.DSH_WEB_URL = ambientUrl
+  for (const dispose of urlDisposers) await dispose?.()
+  await rm(urlDir, { recursive: true, force: true })
 
   for (const check of checks) process.stdout.write(`ok - ${check}\n`)
   process.stdout.write(`\n${checks.length} integration checks passed\n`)
