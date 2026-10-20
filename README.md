@@ -28,8 +28,8 @@ other harness ──MCP (Streamable HTTP or stdio)──> DSH MCP Server ──>
 | `dsh_continue_session` | Send a prompt to an **existing** session (resuming it if it is cold). Keeps the session's context and workspace; `permissionPreset` re-pins the session's sandbox mode and approval policy before the prompt, and `model` (`provider/model`) overrides the session's model. Without `model` the session keeps the model it already runs. |
 | `dsh_list_commands` | The slash commands a session's agent can currently run: the global command layer plus whatever that agent's preset composes, so availability differs per agent preset. |
 | `dsh_run_command` | Run one slash command in a session and return its settled `{ kind, text, commandId }`. `line` takes a complete command line (`"/compact"`, `"/permission danger-full-access"`); `command` (+ optional `args`) takes a bare name. The command executes immediately without a model turn. |
-| `dsh_list_sessions` | A page of the session index: `sessionId`, title, running state, archival state, activity time, and the recorded owning agent (`view: "full"` adds cwd and liveness). Narrow server-side with `query` (title/cwd/owner/id), `mine: true` (or the `restrictToOwner` setting), `owner: "<id>"`, and `running`; page with `cursor`/`nextCursor`. Archived sessions are hidden unless `includeArchived: true`, mirroring the Web UI. |
-| `dsh_read_session` | A window of one session's transcript (user-authored and assistant messages only), plus the last durable `permissionPreset`. `mode: "tail"` (default, last 10) / `"head"` / `"outline"` (one compact row per message with a preview and length, no full text); `roles`, `afterSeq` + `window.nextAfterSeq` to page, `maxChars` (default 2000) to cap a single answer. Reports `totalMessages`, `matchedMessages` and `returned`, so the caller always knows what it has not read. `limit: 0` still means everything. Works while the session is archived. |
+| `dsh_list_sessions` | A page of the session index: `sessionId`, title, running state, archival state, activity time, and the recorded owning agent (`view: "full"` adds cwd and liveness). Narrow server-side with `query` (title/cwd/owner/id), `mine: true` (or the `restrictToOwner` setting), `owner: "<id>"` (narrowing only: on a restricted endpoint another owner is refused), and `running`; page with `cursor`/`nextCursor`. Archived sessions are hidden unless `includeArchived: true`, mirroring the Web UI. |
+| `dsh_read_session` | A window of one session's transcript (user-authored and assistant messages only), plus the last durable `permissionPreset`. `mode: "tail"` (default, last 10) / `"head"` / `"outline"` (one compact row per message with a preview and length, no full text); `roles`, `afterSeq` + `window.nextAfterSeq` to page, `maxChars` (default 2000) to cap a single answer. Reports `totalMessages`, `matchedMessages` and `returned`, so the caller always knows what it has not read. `limit: 0` asks for the largest window (capped at 1000 messages), and one response is capped at about 512K characters (`truncatedByBudget`), so a read can never dump a whole long session. Works while the session is archived. |
 | `dsh_answer_request` | Answer a parked decision, only when the deployment sets `answerUserRequests: true`: `decision: "allow"|"deny"` for an approval (a one-shot grant, or a denial) or `answers: [{ id, selected }]` for a question. Ids come from `dsh_list_requests`, which marks what this endpoint parked with `answerable: true`. The GUI stays in the race — whoever decides first wins — and an unanswered request still fails closed at `requestAnswerTimeoutMs`. An internal DSH caller may only settle an **approval** while it already holds `danger-full-access`; questions are always answerable (see [DSH-local tools](#dsh-local-tools)). |
 | `dsh_wait_session` | Block until the turn a session is already running ends, then return the assistant text it produced — for `wait: false` starts, GUI-driven sessions, or another caller's work. Never prompts, steers, or cancels: reaching `timeoutMs` returns `status: "timedOut"` with the turn still running, so call it again; `status: "idle"` returns immediately when nothing is running. |
 | `dsh_list_requests` | The user decisions a session — or the newest visible sessions, running first — is waiting on: approval requests (`approval/asked` with no matching `approval/decided`, the one-shot permission decision behind a sandbox escalation) and unanswered `ask_user_question` calls, with tool, reason, call id and seq. These audit events are invisible to the model, so this is how a caller learns *why* a delegated turn stopped progressing. Reporting only: the decision is granted in the Harness GUI. |
@@ -116,7 +116,7 @@ against that agent, so a shared endpoint can answer "which sessions did *this* a
 | Rung | Signal | Example |
 |---|---|---|
 | 1 | `x-dsh-mcp-client` request header (or `--client` / `DSH_MCP_CLIENT` on the stdio bridge); a version may follow as `name@version` | `codex`, `claude-code@2.1.295` |
-| 2 | the `clientInfo` block MCP clients send on `initialize`, cached per transport | `claude-code 2.0.1` |
+| 2 | the `clientInfo` block MCP clients send on `initialize`, cached per explicit client label | `claude-code 2.0.1` |
 | 3 | `User-Agent` | `cursor/1.2` |
 | 4 | the auth peer (the bearer token, or DSH connection trust) | `token` |
 
@@ -127,10 +127,12 @@ if another client's `clientInfo` shares its User-Agent. `dsh_whoami` returns the
 lives in `$DSH_HOME/mcp/dsh-mcp-clients.json` (0600), so ownership survives a Harness restart.
 
 This is **attribution, not authentication**: every caller presents the same endpoint token, and a
-client may name itself anything with the header. Set `restrictToOwner: true` to turn the record into
-isolation — a caller can then only list, read, wait on, continue, cancel, archive, or run commands in
-the sessions it created (or adopted: a session with no recorded owner, such as one the GUI started,
-is adopted by the first caller that drives it). A session owned by someone else is refused with a
+client may name itself anything with the header. `restrictToOwner: true` therefore confines honest
+callers, not an attacker who holds the token: it is a guard against accidents, not a credential
+boundary. With it on, a caller can only list, read, wait on, continue, cancel, archive, or run
+commands in the sessions it created (or adopted: a session with no recorded owner, such as one the
+GUI started, is adopted by the first caller that drives it). The `owner` filter cannot widen that
+scope — naming another owner is refused — and a session owned by someone else is refused with a
 diagnostic naming the owner.
 
 Resources: `dsh://status`, `dsh://sessions`, and the template `dsh://session/{sessionId}`.
@@ -238,6 +240,12 @@ An internal caller is attributed and clamped, never trusted:
   strictly wider than its own, so an internal caller may only answer one while it already holds
   `danger-full-access`; anything else stays with the Harness GUI. Questions carry no privilege and
   are always answerable.
+- **A session starts inside the caller's own workspace.** The `cwd` of a session an internal caller
+  starts must resolve inside that caller's recorded workspace root (symlinks included); without a
+  `cwd` it defaults to that root. DSH takes a session's workspace-write boundary from its cwd, so
+  naming another directory would hand the new session a wider write root than the caller holds.
+- **Driving an existing session is clamped too.** `dsh_continue_session` and `dsh_run_command` refuse
+  a target whose sandbox mode is wider than the caller's, or whose writable workspace lies outside it.
 
 External MCP callers are unchanged — they present this endpoint's token, and the ceiling governs calls
 made from inside DSH. The Harness GUI remains an answerer in every race.
@@ -299,10 +307,15 @@ agents working in the **same workspace** what they are doing and which files the
 - **The asker does not wait.** It keeps thinking. When the peer answers — its next assistant message — the
   text reaches the asker as a message labelled with the session that sent it, telling it to adjust its order
   and, if the work is duplicate or conflicting, to negotiate with that peer before continuing.
+- **An answer is only an answer once the peer has seen the notice.** The engine waits for the sourced
+  `user/message` the peer's own log records when it claims the notice, and only then treats the next
+  assistant message as the report; text already in flight when the notice arrived is not mistaken for it.
+  A sub-agent's report is handed to its live agent handle, because the API controller deliberately refuses
+  subagent-owned sessions.
 - **The turn a notice starts is not mistaken for a task.** A delivery that joins a running turn opens none;
-  one that opens a turn is recognised for two minutes, so it is not answered with another round. One question
-  per pair at a time and the cooldown bound what is left, and a peer that never answers produces exactly one
-  line rather than a stream.
+  one that opens a turn is counted and consumed by that turn, so it is not answered with another round.
+  One question per pair at a time, one round per asker, and the cooldown bound what is left; a peer that
+  never answers produces exactly one line, and a sub-agent's notice never wakes an idle root.
 
 On by default: a deployment running one agent at a time pays nothing, because no notice is ever sent when
 no peer is running. `syncOnStart: false` turns it off; the switch is on the Plugins page. The advanced knobs
@@ -343,6 +356,11 @@ none of them needs a YAML edit:
 Each control saves through the profile configuration editor and reloads this plugin's row, exactly as a
 hand edit would.
 
+The route is loopback-only **and** browser-hardened: a request carrying a foreign `Origin`/`Sec-Fetch-Site`
+is refused through DSH's own connection fence, the body must be `application/json`, unknown fields are
+rejected, and an oversized body gets a `413` rather than a reset socket. A local tool that sends no
+`Origin` can still POST JSON.
+
 ## Endpoint and authentication
 
 On activation the plugin registers `POST /mcp` on the Harness web server (default
@@ -353,7 +371,9 @@ $DSH_HOME/mcp/dsh-mcp-endpoint.json      # mode 0600
 { "url": "...", "token": "...", "stdioBridge": "...", "tools": [...] }
 ```
 
-Every request must present the bearer token:
+Every request must present the bearer token, in the `Authorization` header (no query-string form: a token
+in a URL lands in access logs). The comparison is made over SHA-256 digests, so it is constant-time even
+for a token of the wrong length.
 
 ```
 Authorization: Bearer <token>
@@ -533,16 +553,19 @@ private profile, with the token the server is configured with.
 
 ```bash
 node test/mcp-self-test.mjs            # 11 transport checks, no Harness needed
-node test/work-sync-test.mjs           # 12 checks: the progress-sync engine against a fake Harness
-node test/client-half-test.mjs         # 11 checks: the browser half's row page, its settings, its route
-node test/plugin-integration-test.mjs  # 115 checks: apply(), endpoint file + advertised URL, tools,
+node test/work-sync-test.mjs           # 16 checks: the progress-sync engine against a fake Harness
+node test/client-half-test.mjs         # 14 checks: the browser half's row page, its settings, its route
+node test/plugin-integration-test.mjs  # 123 checks: apply(), endpoint file + advertised URL, tools,
                                        # transcript windows, outline/paging/truncation, search, index
                                        # cursors, pending user decisions (PTC included), parked approvals
                                        # and questions answered over MCP, waiting, caller identity +
                                        # restrictToOwner, archival tools, permissions, commands, model
                                        # pinning, hot-reload ownership, the on-demand DSH surface (catalogue,
                                        # open, dispatch), its authority ceiling, the configuration route,
-                                       # sidebar grouping, delivery mode, sender attribution, lossless values
+                                       # sidebar grouping, delivery mode, sender attribution, lossless values,
+                                       # the workspace-root clamp, restrictToOwner's owner filter, the
+                                       # configuration route's origin/content-type/413 fences, live default
+                                       # model resolution, notice-claim correlation, ownership persistence
 node test/stdio-bridge-test.mjs        # 4 checks, needs a RUNNING Harness (one real delegated turn)
 node test/live-e2e-test.mjs            # 46 checks over HTTP: protocol, resources, all eighteen tools,
                                        # archive/unarchive, permission presets, commands, error paths,

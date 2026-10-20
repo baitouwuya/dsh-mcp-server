@@ -11,9 +11,9 @@
  * @module @local/dsh-mcp-server
  */
 
-import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { readFileSync, rmSync } from 'node:fs'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 
@@ -27,7 +27,7 @@ import { createWorkSync } from './lib/work-sync.js'
 import { groupOwnedSessions } from './lib/workspace-grouping.js'
 
 /** Keep in sync with package.json; reported through `initialize`. */
-const VERSION = '0.11.2'
+const VERSION = '0.11.3'
 
 /** This package's own name, as the profile's bundle row spells it. */
 const PACKAGE_NAME = (() => {
@@ -62,22 +62,23 @@ function resolvePath(config) {
 }
 
 /** Read a bearer token from the headers or query string. */
-function readPresentedToken(req, url) {
+function readPresentedToken(req) {
   const header = req.headers?.authorization
   if (typeof header === 'string' && /^bearer /i.test(header)) return header.slice(7).trim()
   const direct = req.headers?.['x-dsh-mcp-token']
   if (typeof direct === 'string' && direct) return direct.trim()
-  const query = url?.searchParams?.get('token')
-  if (typeof query === 'string' && query) return query.trim()
+  // No query-string fallback: a token in a URL lands in access logs, proxied
+  // request lines, and browser history.
   return undefined
 }
 
 /** Constant-time token comparison that never throws on length mismatch. */
 function tokensMatch(presented, expected) {
   if (typeof presented !== 'string' || !presented) return false
-  const a = Buffer.from(presented, 'utf8')
-  const b = Buffer.from(expected, 'utf8')
-  if (a.length !== b.length) return false
+  // Hash both sides first: comparing the digests keeps the comparison
+  // constant-time even when the presented token has a different length.
+  const a = createHash('sha256').update(presented, 'utf8').digest()
+  const b = createHash('sha256').update(expected, 'utf8').digest()
   try {
     return timingSafeEqual(a, b)
   } catch {
@@ -105,9 +106,11 @@ export function apply(ctx, config = {}) {
     : join(dshHome, 'mcp', 'dsh-mcp-endpoint.json')
   const writeEndpointFile = config.writeEndpointFile !== false
   const allowConnectionAuth = config.allowConnectionAuth !== false
-  const turnTimeoutMs = Number.isFinite(Number(config.turnTimeoutMs)) ? Number(config.turnTimeoutMs) : DEFAULT_TURN_TIMEOUT_MS
+  const turnTimeoutMs = Number.isFinite(Number(config.turnTimeoutMs))
+    ? Math.max(1000, Math.min(24 * 60 * 60 * 1000, Number(config.turnTimeoutMs)))
+    : DEFAULT_TURN_TIMEOUT_MS
   const maxConcurrentTurns = Number.isFinite(Number(config.maxConcurrentTurns))
-    ? Math.max(1, Number(config.maxConcurrentTurns))
+    ? Math.max(1, Math.min(64, Math.trunc(Number(config.maxConcurrentTurns))))
     : DEFAULT_MAX_CONCURRENT_TURNS
   // Attribution is always on; `restrictToOwner` is the opt-in gate that turns it
   // into isolation between callers that share this endpoint's token.
@@ -240,22 +243,38 @@ export function apply(ctx, config = {}) {
   }
   const endpointUrl = `${resolveBaseUrl()}${path}`
 
-  /** Default model for newly started sessions; a continued session keeps its own model. */
-  const defaultModel = (() => {
+  /**
+   * Default model for newly started sessions; a continued session keeps its own.
+   *
+   * Resolved per call, never captured: the Harness's selection is volatile (the
+   * user can change it, and a catalog change can retire a pair), so a value
+   * captured at activation would pin every later session to a stale model.
+   */
+  const configuredModel = (() => {
     if (config.defaultModel && typeof config.defaultModel === 'object') {
       const { provider, model, reasoningEffort } = config.defaultModel
       if (typeof provider === 'string' && typeof model === 'string') {
         return { provider, model, ...(typeof reasoningEffort === 'string' ? { reasoningEffort } : {}) }
       }
     }
+    return undefined
+  })()
+  function resolveDefaultModel() {
+    if (configuredModel) return configuredModel
     try {
       const selection = ctx.get('agentDefaultModel')?.currentSelection?.()
-      if (selection?.provider && selection?.model) return { provider: selection.provider, model: selection.model }
+      if (selection?.provider && selection?.model) {
+        return {
+          provider: selection.provider,
+          model: selection.model,
+          ...(typeof selection.reasoningEffort === 'string' ? { reasoningEffort: selection.reasoningEffort } : {}),
+        }
+      }
     } catch (error) {
       log('debug', 'default model lookup failed', { error: error instanceof Error ? error.message : String(error) })
     }
     return undefined
-  })()
+  }
 
   const startedAt = Date.now()
   /** Identity of this activation; a dispose only removes the endpoint file this activation wrote. */
@@ -280,7 +299,7 @@ export function apply(ctx, config = {}) {
     answerUserRequests,
     answerOwnedSessionsOnly,
     ...(requestAnswerTimeoutMs === undefined ? {} : { requestAnswerTimeoutMs }),
-    defaultModel,
+    defaultModel: resolveDefaultModel,
     defaultCwd: typeof config.defaultCwd === 'string' && config.defaultCwd ? resolve(config.defaultCwd) : undefined,
     turnTimeoutMs,
     maxConcurrentTurns,
@@ -334,6 +353,7 @@ export function apply(ctx, config = {}) {
       ...(typeof item.cwd === 'string' ? { cwd: item.cwd } : {}),
       ...(Number.isFinite(Number(item.updatedAt)) ? { updatedAt: Number(item.updatedAt) } : {}),
       ...(typeof item.parentSessionId === 'string' ? { parentSessionId: item.parentSessionId } : {}),
+      ...(typeof item.origin === 'string' ? { origin: item.origin } : {}),
     }))
   }
 
@@ -371,7 +391,7 @@ export function apply(ctx, config = {}) {
 
   /** Authorize one inbound request: bearer token first, then Harness connection trust. */
   function authorize(req, url) {
-    const presented = readPresentedToken(req, url)
+    const presented = readPresentedToken(req)
     if (tokensMatch(presented, token)) return { ok: true, peer: 'token' }
     if (allowConnectionAuth && connection) {
       try {
@@ -390,13 +410,47 @@ export function apply(ctx, config = {}) {
     }
   }
 
+  /**
+   * Admit one configuration-page request.
+   *
+   * The route is loopback-only, but loopback includes the user's browser: a
+   * foreign page could otherwise POST settings (a CORS-simple `text/plain`
+   * request) or read them through DNS rebinding. Browser-shaped requests go
+   * through the Harness's own Host/Origin fence; a local tool without Origin is
+   * admitted because it already needs the loopback socket.
+   */
+  function configTrust(req) {
+    const origin = req.headers?.origin
+    const site = req.headers?.['sec-fetch-site']
+    const browserRequest = typeof origin === 'string' || typeof site === 'string'
+    if (!browserRequest) return true
+    if (site === 'cross-site') return false
+    if (connection) {
+      try {
+        return connection.requestRejection({ headers: req.headers }) === undefined
+      } catch (error) {
+        log('debug', 'configuration admission failed', { error: error instanceof Error ? error.message : String(error) })
+      }
+    }
+    if (typeof origin === 'string' && typeof req.headers?.host === 'string') {
+      try {
+        return new URL(origin).host === req.headers.host
+      } catch {
+        return false
+      }
+    }
+    return false
+  }
+
   const handler = createMcpHttpHandler({
     gateway,
     authorize,
     identify,
     logger: log,
     path,
-    maxBodyBytes: Number.isFinite(Number(config.maxBodyBytes)) ? Number(config.maxBodyBytes) : undefined,
+    maxBodyBytes: Number.isFinite(Number(config.maxBodyBytes))
+      ? Math.max(1024, Math.min(64 * 1024 * 1024, Number(config.maxBodyBytes)))
+      : undefined,
   })
 
   const disposeRoute = ctx.webServer.register({ kind: 'exact', path, handler })
@@ -516,7 +570,15 @@ export function apply(ctx, config = {}) {
     const removed = []
     const missing = []
     for (const path of paths) {
-      const workspace = await registry.resolveByPath(path)
+      let workspace
+      try {
+        workspace = await registry.resolveByPath(path)
+      } catch {
+        // A path that does not exist is a missing registration, not a failure:
+        // report it and keep removing the rest.
+        missing.push(path)
+        continue
+      }
       if (!workspace) {
         missing.push(path)
         continue
@@ -560,6 +622,7 @@ export function apply(ctx, config = {}) {
         remove: removeDshGroups,
         queueSession: queueOpenSession,
         ackCommand: async () => { guiCommand = undefined },
+        trust: configTrust,
         logger: log,
       }),
     })
@@ -586,6 +649,8 @@ export function apply(ctx, config = {}) {
     try {
       await mkdir(dirname(endpointFile), { recursive: true, mode: 0o700 })
       await writeFile(endpointFile, JSON.stringify(payload, null, 2) + '\n', { mode: 0o600 })
+      // `mode` only applies when the file is created; tighten a pre-existing one.
+      await chmod(endpointFile, 0o600).catch(() => {})
       log('info', 'endpoint published', { url, endpointFile })
     } catch (error) {
       log('warn', 'could not publish endpoint file', {

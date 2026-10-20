@@ -15,7 +15,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { createClientRegistry } from '../lib/clients.js'
+import { createClientRegistry, resolveCaller } from '../lib/clients.js'
 import { lossless } from '../lib/dsh-tools-bridge.js'
 import { groupOwnedSessions } from '../lib/workspace-grouping.js'
 import { apply } from '../index.js'
@@ -24,7 +24,7 @@ const PROMPT = 'delegate this task'
 const REPLY = 'hello from dsh'
 
 /** The DSH agent a local tool call is attributed to. */
-const INTERNAL_AGENT = { id: 'agent-live', session: { header: { id: 'live-session' } } }
+const INTERNAL_AGENT = { id: 'agent-live', session: { header: { id: 'live-session', cwd: '/' } } }
 
 /** Minimal fake Cordis context exposing only what the plugin touches. */
 function makeContext(services, disposers, hooks = new Map()) {
@@ -64,6 +64,7 @@ function makeServices() {
   const appliedPermissions = []
   const resolvedAgents = []
   const modelSelections = []
+  const followRequests = []
   const cancelledSessions = []
   const runningSessions = new Set()
   const extraSessions = []
@@ -119,6 +120,8 @@ function makeServices() {
   /** The calling agent's own authority, which the clamp is measured against. */
   let callerMode = 'workspace-write'
   let callerPreset = 'workspace-write'
+  let defaultSelection = { provider: 'deepseek-official', model: 'deepseek-v4.1-flash-anthropic' }
+  let selectModelFailure = false
   const registeredTools = []
   const configEdits = []
   const permissionPresets = {
@@ -218,6 +221,11 @@ function makeServices() {
       return { sessionId: currentSessionId }
     },
     async selectModel(request) {
+      if (selectModelFailure) {
+        const error = new Error('session/model-unavailable')
+        error.code = 'session/model-unavailable'
+        throw error
+      }
       modelSelections.push(request)
     },
     /** Cold-session resume path used when the store holds no live entry. */
@@ -229,6 +237,7 @@ function makeServices() {
       return admit(request)
     },
     follow(_request, signal) {
+      followRequests.push(_request)
       if (hang) {
         // A turn that never ends on its own: only the caller's ceiling stops the wait.
         const snapshot = { type: 'snapshot', header: { id: currentSessionId }, cursor: 0, records: [], hasMore: false }
@@ -389,7 +398,7 @@ function makeServices() {
 
   /** A calling agent with the scoped context `dsh_mcp_open` registers into. */
   function makeAgent(id = 'agent-live', sessionId = 'live-session') {
-    const agent = { id, session: { header: { id: sessionId } } }
+    const agent = { id, session: { header: { id: sessionId, cwd: '/' } } }
     const registered = []
     agentScopes.set(agent, registered)
     const scope = {
@@ -445,7 +454,9 @@ function makeServices() {
       configEditor,
       clientModules,
       tools,
-      agentDefaultModel: { currentSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-v4.1-flash-anthropic' }) },
+      agentDefaultModel: { currentSelection: () => ({ ...defaultSelection }) },
+      setDefaultSelection: (selection) => { defaultSelection = selection },
+      setSelectModelFailure: (value) => { selectModelFailure = value === true },
     },
     webServer,
     getPrompt: () => pendingPrompt,
@@ -453,6 +464,7 @@ function makeServices() {
     archivedIds: () => [...archived],
     appliedPermissions: () => appliedPermissions.map((entry) => entry.name),
     modelSelections: () => [...modelSelections],
+    followRequests: () => [...followRequests],
     cancelledSessions: () => [...cancelledSessions],
     setRunning: (value) => {
       if (value) runningSessions.add(currentSessionId)
@@ -480,7 +492,7 @@ function makeServices() {
 
 const dir = await mkdtemp(join(tmpdir(), 'dsh-mcp-test-'))
 const endpointFile = join(dir, 'dsh-mcp-endpoint.json')
-const { services, webServer, getPrompt, setBusy, archivedIds, appliedPermissions, modelSelections, cancelledSessions, setRunning, setHang, seedMessages, seedEvents, addSyntheticSessions, resolvedAgents, listedCommandAgents, executedCommands, currentId, registeredTools, makeAgent, agentTools, configEdits, setCallerMode, setCallerPreset, injectedMessages, workspaces, workspaceCalls } = makeServices()
+const { services, webServer, getPrompt, setBusy, archivedIds, appliedPermissions, modelSelections, cancelledSessions, setRunning, setHang, seedMessages, seedEvents, addSyntheticSessions, resolvedAgents, listedCommandAgents, executedCommands, currentId, registeredTools, makeAgent, agentTools, configEdits, setCallerMode, setCallerPreset, injectedMessages, workspaces, workspaceCalls, followRequests } = makeServices()
 let sessionIdFromRun
 const disposers = []
 const ctx = makeContext(services, disposers)
@@ -565,6 +577,18 @@ try {
   assert.equal(waited.messages.at(-1).text, REPLY)
   assert.deepEqual(cancelledSessions(), [])
   checks.push('dsh_wait_session follows a running turn to its end and returns its text')
+
+  // A subagent session is followed through its durable parent address: the API
+  // controller refuses the plain session form for those.
+  const liveRow = services.sessions.get(sessionIdFromRun)
+  liveRow.header = { ...liveRow.header, origin: 'subagent', parentSession: 'parent-one' }
+  setRunning(true)
+  const subagentWait = await call('dsh_wait_session', { sessionId: sessionIdFromRun })
+  assert.equal(subagentWait.status, 'completed')
+  assert.equal(followRequests().at(-1).address.kind, 'subagent')
+  assert.equal(followRequests().at(-1).address.parentSessionId, 'parent-one')
+  liveRow.header = { ...liveRow.header, origin: undefined, parentSession: undefined }
+  checks.push('a subagent session is followed through its parent address')
 
   setRunning(true)
   setHang(true)
@@ -698,6 +722,26 @@ try {
   assert.equal(modelSelections().length, 3, 'a resumed session without "model" must not re-pin the session model')
   checks.push('resuming a session without "model" leaves its model alone')
 
+  // The Harness default is volatile: a model the user picks after this plugin
+  // started must be used by the next session rather than a value captured at
+  // activation.
+  services.setDefaultSelection({ provider: 'deepseek-official', model: 'deepseek-v4.1-flash-1017-anthropic' })
+  const liveStatus = await call('dsh_status', {})
+  assert.equal(liveStatus.defaultModel.model, 'deepseek-v4.1-flash-1017-anthropic', 'dsh_status reads the model at call time')
+  const liveModel = await call('dsh_run_prompt', { prompt: PROMPT, cwd: '/tmp' })
+  assert.equal(liveModel.status, 'completed')
+  assert.equal(modelSelections().at(-1).model, 'deepseek-v4.1-flash-1017-anthropic', 'a new session follows the live default')
+  checks.push('the default model is resolved at call time')
+
+  // A default that went stale (a retired pair) must not cost the session: the
+  // Host keeps its own default and the call still completes.
+  services.setSelectModelFailure(true)
+  const staleDefault = await call('dsh_run_prompt', { prompt: PROMPT, cwd: '/tmp' })
+  assert.equal(staleDefault.status, 'completed', 'a stale default model does not fail the session')
+  services.setSelectModelFailure(false)
+  services.setDefaultSelection({ provider: 'deepseek-official', model: 'deepseek-v4.1-flash-anthropic' })
+  checks.push('a stale default model is logged instead of failing the prompt')
+
   // --- caller identity and session ownership ----------------------------------
   const codex = { headers: { 'x-dsh-mcp-client': 'codex' } }
   const claude = { headers: { 'x-dsh-mcp-client': 'claude-code' } }
@@ -772,6 +816,31 @@ try {
   assert.ok(persisted.clientOf(anonymous.client.id))
   checks.push('the caller registry is persisted and reloads after a restart')
 
+  const evictionDir = await mkdtemp(join(tmpdir(), 'dsh-mcp-evict-'))
+  const evictionFile = join(evictionDir, 'clients.json')
+  const eviction = createClientRegistry({ file: evictionFile, flushMs: 0 })
+  for (let index = 0; index < 70; index += 1) {
+    const caller = { id: `client-${index}`, name: `client-${index}`, source: 'header' }
+    eviction.touch(caller)
+    eviction.claim(`session-${index}`, caller, {})
+  }
+  eviction.flush()
+  const reloadedRegistry = createClientRegistry({ file: evictionFile })
+  reloadedRegistry.load()
+  assert.equal(reloadedRegistry.ownerOf('session-0')?.ownerId, 'client-0', 'a client LRU eviction does not orphan its sessions')
+  await rm(evictionDir, { recursive: true, force: true })
+  checks.push('the persisted registry keeps session ownership when the client LRU turns over')
+
+  const identityCache = new Map()
+  resolveCaller({ headers: { 'user-agent': 'shared-agent' }, clientInfo: { name: 'victim' } }, identityCache)
+  const unrelatedCaller = resolveCaller({ headers: { 'user-agent': 'shared-agent' } }, identityCache)
+  assert.notEqual(unrelatedCaller.name, 'victim', 'a shared User-Agent is not an identity cache key')
+  const labelledCaller = resolveCaller({ headers: { 'x-dsh-mcp-client': 'bridge' }, clientInfo: { name: 'bridge', version: '1' } }, identityCache)
+  const labelledAgain = resolveCaller({ headers: { 'x-dsh-mcp-client': 'bridge' } }, identityCache)
+  assert.equal(labelledCaller.name, 'bridge')
+  assert.equal(labelledAgain.version, '1', 'an explicit label still remembers its clientInfo')
+  checks.push('clientInfo is cached only for an explicit client label')
+
   // --- restrictToOwner --------------------------------------------------------
   const strictDir = await mkdtemp(join(tmpdir(), 'dsh-mcp-strict-'))
   const strict = makeServices()
@@ -811,7 +880,12 @@ try {
     (await strictCall('dsh_list_sessions', { limit: 20 }, { 'x-dsh-mcp-client': 'codex' })).result.structuredContent.sessions.map((session) => session.sessionId),
     [strictSession],
   )
-  checks.push('restrictToOwner confines every caller to the sessions it created')
+  const ownerProbe = await strictCall('dsh_list_sessions', { owner: 'codex' }, { 'x-dsh-mcp-client': 'claude-code' })
+  assert.ok(ownerProbe.result.isError, 'a restricted caller cannot select another owner')
+  assert.match(ownerProbe.result.content[0].text, /owner/)
+  const ownerSearch = await strictCall('dsh_search_sessions', { query: 'task', owner: 'codex' }, { 'x-dsh-mcp-client': 'claude-code' })
+  assert.ok(ownerSearch.result.isError, 'a restricted caller cannot search another owner s sessions')
+  checks.push('restrictToOwner confines every caller to the sessions it created, and the owner filter cannot widen it')
   assert.equal(strict.workspaceCalls().length, 0, 'groupSessions: false leaves the sidebar alone')
   checks.push('groupSessions: false keeps sessions out of the project sidebar')
   for (const dispose of strictDisposers) await dispose?.()
@@ -1542,7 +1616,31 @@ try {
     body: JSON.stringify({ removeGroups: ['not/absolute'] }),
   })
   assert.equal(relativeRemoval.status, 400)
-  checks.push('the configuration route rejects a non-boolean, an unknown mode, an empty patch, and a relative path')
+  const unknownField = await fetch(configUrl, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ exposeToDsh: true, typo: 1 }),
+  })
+  assert.equal(unknownField.status, 400, 'an unknown field is refused instead of being ignored')
+  const notJson = await fetch(configUrl, {
+    method: 'POST',
+    headers: { 'content-type': 'text/plain' },
+    body: JSON.stringify({ ackCommand: true }),
+  })
+  assert.equal(notJson.status, 415, 'a CORS-simple body type is refused')
+  const foreignOrigin = await fetch(configUrl, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', origin: 'http://evil.example' },
+    body: JSON.stringify({ ackCommand: true }),
+  })
+  assert.equal(foreignOrigin.status, 403, 'a foreign browser origin is refused')
+  const oversized = await fetch(configUrl, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ openSession: 'x'.repeat(5000) }),
+  })
+  assert.equal(oversized.status, 413, 'an oversized body gets a 413, not a reset socket')
+  checks.push('the configuration route rejects a non-boolean, an unknown mode, an empty patch, a relative path, unknown fields, non-JSON bodies, foreign origins, and oversized bodies')
 
   // Undoing automation: a project registration can be dropped deliberately.
   const removeNow = async () => (await fetch(configUrl, {
@@ -1652,17 +1750,78 @@ try {
   assert.equal(injectedMessages().length, totalBefore, 'the turn a notice caused starts no round of its own')
   checks.push('a notice never triggers another notice')
 
+  // An assistant message produced before the peer has claimed the notice is the
+  // peer's pre-notice work, not its answer.
+  syncHandler(
+    { id: 'session-sync-peer' },
+    { type: 'assistant/message', data: { turn: 1, step: 1, message: { role: 'assistant', content: [{ type: 'text', text: '我先在读旧文件' }] } } },
+  )
+  await syncTick()
+  assert.equal(messagesTo('session-sync-asker').length, 0, 'a pre-notice assistant message is not reported as an answer')
+
+  // The peer claims the notice in its own log; that is the signal that its next
+  // assistant message answers the question.
+  syncHandler(
+    { id: 'session-sync-peer' },
+    {
+      type: 'user/message',
+      data: {
+        turn: 1,
+        source: { kind: 'dsh-mcp-server', sessionId: 'session-sync-asker' },
+        content: [{ type: 'text', text: '进度同步' }],
+      },
+    },
+  )
+  await syncTick()
+
   // The answer comes back to the asker, attributed to the session that sent it.
   syncHandler(
     { id: 'session-sync-peer' },
-    { type: 'assistant/message', data: { message: { role: 'assistant', content: [{ type: 'text', text: '我在改 lib/x.js，排在你的改动之前' }] } } },
+    { type: 'assistant/message', data: { turn: 1, step: 2, message: { role: 'assistant', content: [{ type: 'text', text: '我在改 lib/x.js，排在你的改动之前' }] } } },
   )
   await syncTick()
   const reports = messagesTo('session-sync-asker')
   assert.equal(reports.length, 1, 'the peer answer reaches the asking session')
   assert.match(reports[0].message.content[0].text, /lib\/x\.js/)
   assert.equal(reports[0].message.source.sessionId, 'session-sync-peer')
-  checks.push('the peer answer reaches the asker, labelled with the session that sent it')
+  checks.push('the peer answer reaches the asker only after the notice is claimed, labelled with its session')
+
+  // An internal caller may start a session only inside its own workspace root:
+  // the session's cwd is what DSH uses as its sandbox boundary.
+  const guardRoot = await mkdtemp('/tmp/dsh-mcp-guard-')
+  const guardedAgent = { id: 'agent-guarded', session: { header: { id: 'guarded-session', cwd: guardRoot } } }
+  const outside = await dispatch('dsh_run_prompt', { prompt: 'escape', cwd: '/etc' }, guardedAgent).then(() => undefined, (error) => error)
+  assert.match(String(outside && outside.message), /inside this caller's workspace/)
+  const insideDir = await mkdtemp(join(guardRoot, 'inside-'))
+  const inside = await dispatch('dsh_run_prompt', { prompt: 'stay inside', cwd: insideDir }, guardedAgent)
+  assert.ok(inside && inside.sessionId, 'a directory inside the caller workspace is allowed')
+  checks.push('an internal caller cannot start a session outside its own workspace root')
+
+  // A transcript read is bounded by a total response budget even when the caller
+  // asks for everything.
+  seedMessages(Array.from({ length: 3 }, () => ({ role: 'assistant', text: 'x'.repeat(200_000) })))
+  const budgeted = await call('dsh_read_session', { sessionId: currentId(), limit: 0, maxChars: 0 })
+  assert.equal(budgeted.truncatedByBudget, true, 'a huge read stops at the response budget')
+  assert.ok(budgeted.returned < budgeted.totalMessages, 'and returns fewer messages than the log holds')
+  checks.push('a transcript read is capped by a total response budget')
+  await rm(guardRoot, { recursive: true, force: true })
+
+  // Unknown tools are a malformed request (-32602), not method-not-found.
+  const unknownTool = await rpc({
+    jsonrpc: '2.0',
+    id: ++id,
+    method: 'tools/call',
+    params: { name: 'nope', arguments: {} },
+  })
+  assert.equal(unknownTool.error.code, -32602, 'an unknown tool name is invalid params')
+  const badUri = await rpc({
+    jsonrpc: '2.0',
+    id: ++id,
+    method: 'resources/read',
+    params: { uri: 'dsh://session/%E0%A4%A' },
+  })
+  assert.equal(badUri.error.code, -32602, 'a malformed resource id is invalid params')
+  checks.push('unknown tools and malformed resource ids are invalid params, not internal errors')
 
   for (const dispose of disposers) await dispose?.()
   assert.equal(webServer.registered.length, 0, 'disposal removes the routes')

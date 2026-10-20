@@ -11,7 +11,7 @@
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 
-import { createConfigHandler } from '../lib/config-route.js'
+import { createConfigHandler, validateConfigPatch } from '../lib/config-route.js'
 
 const checks = []
 
@@ -98,6 +98,29 @@ for (const expected of ['Surface', 'On demand', 'All at once', 'Sidebar projects
   assert.ok(labels.includes(expected), `the settings page must offer "${expected}"`)
 }
 checks.push('the settings page renders every control it offers')
+
+// Every switch must be operable: a truthy `disabled` left a page whose main
+// enable toggle could never be clicked.
+const findButtons = (node, found = []) => {
+  if (node === null || node === undefined || typeof node !== 'object') return found
+  if (Array.isArray(node)) { for (const child of node) findButtons(child, found); return found }
+  if (node.type === 'button') found.push(node)
+  for (const child of node.children ?? []) findButtons(child, found)
+  return found
+}
+const panelTree = panelPage({ view: 'page' }).type(panelPage({ view: 'page' }).props)
+const switches = findButtons(panelTree).filter((button) => button.props.role === 'switch')
+assert.equal(switches.length, 2, 'the page offers the enable switch and the sync switch')
+assert.equal(Boolean(switches[0].props.disabled), false, 'the enable switch is operable')
+assert.equal(Boolean(switches[1].props.disabled), false, 'the sync switch is operable')
+checks.push('both switches are operable in the ready state')
+const panelCopy = labels.join(' ')
+assert.equal(/\b17 tools\b|17 个工具/.test(panelCopy), false, 'the page does not advertise a stale tool count')
+assert.match(panelCopy, /18 tools/, 'the page names the real published count')
+checks.push('the page copy matches the eighteen published tools')
+
+assert.match(validateConfigPatch({ exposeToDsh: true, typo: 1 }).error, /Unknown field/, 'unknown fields are refused, not ignored')
+checks.push('the configuration validator refuses unknown fields')
 
 // --- the switch's read/write contract ----------------------------------------
 let written
