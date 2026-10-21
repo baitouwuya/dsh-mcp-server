@@ -27,13 +27,13 @@ ships imports a DSH package, so every layer talks through `ctx` and plain data.
 
 | Module | Role |
 |---|---|
-| [`index.js`](index.js) | Composition root: reads the row config, registers the routes and the local tools, and owns one `ctx.effect` per resource so a reload unwinds exactly what it created. |
+| [`index.js`](index.js) | Composition root: reads the row config, registers the routes and the local tools, and owns the plugin's `ctx.effect`s (sync, endpoint publication, route/tool/state disposal) so a reload unwinds what it created. |
 | [`lib/protocol.js`](lib/protocol.js) | MCP wire: JSON-RPC envelope, protocol-version negotiation, error codes, gateway dispatch. |
 | [`lib/http-route.js`](lib/http-route.js) / [`bin/dsh-mcp-stdio.mjs`](bin/dsh-mcp-stdio.mjs) | The two transports: Streamable HTTP on the Harness listener, and a stdio bridge that forwards to that same endpoint. |
 | [`lib/dsh-capabilities.js`](lib/dsh-capabilities.js) | The DSH-facing tools and resources; each maps onto live services (`sessionController`, `sessionQuery`, `tools`, …). |
 | [`lib/authority.js`](lib/authority.js) | The authority arithmetic those tools are clamped by: the sandbox ladder, workspace containment, and the `cwd` clamp. |
-| [`lib/dsh-contracts.js`](lib/dsh-contracts.js) | The Harness wire shapes the plugin reads and writes — session ids, message prose, transcript rows, turns, failure text — the one place the hand-spelled contracts live. |
-| [`lib/dsh-tools-bridge.js`](lib/dsh-tools-bridge.js) | The same table exposed *into* DSH: the three-tool front door or the full registry, registered in the calling agent's scope. |
+| [`lib/dsh-contracts.js`](lib/dsh-contracts.js) | The shape of the events and messages the tools read: session ids, message prose, transcript rows, turn numbers, failure text — one definition instead of a copy per caller. Transport-level error formatting stays with the transport. |
+| [`lib/dsh-tools-bridge.js`](lib/dsh-tools-bridge.js) | The same table exposed *into* DSH: the three-tool front door or the full registry installed in the injected tools scope, plus tools opened lazily in the calling agent's own scope. |
 | [`lib/clients.js`](lib/clients.js) | Caller identity and session ownership: header/`clientInfo`/User-Agent, a 0600 registry, and the owner a session is recorded against. |
 | [`lib/config-route.js`](lib/config-route.js) + [`lib/client.js`](lib/client.js) | Control plane: a loopback JSON route and the Plugins-page panel that reads and writes it. |
 | [`lib/work-sync.js`](lib/work-sync.js) | Task-start progress sync between agents in one workspace, built only on `session/event`. |
@@ -42,8 +42,8 @@ ships imports a DSH package, so every layer talks through `ctx` and plain data.
 Three rules keep the layering honest. **Services, not re-implementations**: transcript reads replay the durable
 event log, permissions come from `permissionPresets`, sidebar membership from `workspaceRegistry`. **Narrow
 seams**: the transport never touches a session, and the capabilities never touch a socket. **Only own state on
-disk**: everything this plugin persists is `$DSH_HOME/mcp/*.json` at mode 0600 — never a session, a transcript,
-or a setting DSH already owns.
+disk**: everything this plugin persists is its own state (`$DSH_HOME/mcp/*.json` by default; `endpointFile` and
+`clientsFile` move it) at mode 0600 — never a session, a transcript, or a setting DSH already owns.
 
 ## What it exposes
 
@@ -447,7 +447,7 @@ The bundle row in `cordis.patch.yml` accepts (all optional):
 | `clientsFile` | `$DSH_HOME/mcp/dsh-mcp-clients.json` | Where the caller registry (agents seen + session owners) is kept, mode 0600. |
 | `clientsFlushMs` | `5000` | How long registry writes are coalesced before they hit disk. |
 | `exposeToDsh` | `true` | Expose the MCP tools to DSH itself. `false` keeps the endpoint MCP-only. |
-| `exposeToDshMode` | `lazy` | `lazy` registers the three-tool front door, whose catalogue description already carries every published name and its required arguments, and lets a session open what it needs; `full` registers all eighteen at load (permanent schema cost). An unknown value fails at load. |
+| `exposeToDshMode` | `lazy` | `lazy` registers the three-tool front door, whose `dsh_mcp_tools` description already carries every published name and its required arguments (the result rows are name/purpose/native only), and lets a session open what it needs; `full` registers all eighteen at load (permanent schema cost). An unknown value fails at load. |
 | `exposeToDshPage` | `true` | Serve the loopback configuration route the Web Plugins page's switch reads and writes. |
 | `configPath` | `<path>-config` | Route path of that configuration endpoint (`/mcp-config` by default). |
 | `entryId` | `dsh-mcp-server` | Profile row the configuration page addresses when it saves the switch. |
@@ -590,9 +590,10 @@ What a calling model sees, and why it was shaped that way:
 - **Failures are typed.** An unknown tool or a malformed resource id is `-32602 invalidParams`; a normal tool
   failure is an `isError` result that does not end the turn. Messages say what to do next ("retry with
   `stopActivity: true`", "raise this session's preset in the Harness GUI") instead of leaking a stack.
-- **The surface is load-aware.** `exposeToDshMode: lazy` gives a DSH session three tools plus a catalogue that
-  already carries every published name and its required arguments; `full` puts all eighteen in the prompt.
-- **Status is one call.** `dsh_status` answers "what am I talking to" — endpoint, versions, live model
+- **The surface is load-aware.** `exposeToDshMode: lazy` gives a DSH session three tools, and the `dsh_mcp_tools`
+  description already carries every published name and its required arguments (the result rows are name, purpose
+  and `native`); `full` puts all eighteen in the prompt.
+- **Status is one call.** `dsh_status` answers "what am I talking to" — endpoint, plugin version, live model
   selection, delivery policy, sync state, tool-table shape — without probing.
 
 ## Verification

@@ -28,7 +28,7 @@ import { groupOwnedSessions } from './lib/workspace-grouping.js'
 import { assistantTextOf } from './lib/dsh-contracts.js'
 
 /** Keep in sync with package.json; reported through `initialize`. */
-const VERSION = '0.12.0'
+const VERSION = '0.12.1'
 
 /** This package's own name, as the profile's bundle row spells it. */
 const PACKAGE_NAME = (() => {
