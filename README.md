@@ -35,7 +35,7 @@ ships imports a DSH package, so every layer talks through `ctx` and plain data.
 | [`lib/dsh-contracts.js`](lib/dsh-contracts.js) | The shape of the events and messages the tools read: session ids, message prose, transcript rows, turn numbers, failure text — one definition instead of a copy per caller. Transport-level error formatting stays with the transport. |
 | [`lib/dsh-tools-bridge.js`](lib/dsh-tools-bridge.js) | The same table exposed *into* DSH: the three-tool front door or the full registry installed in the injected tools scope, plus tools opened lazily in the calling agent's own scope. |
 | [`lib/clients.js`](lib/clients.js) | Caller identity and session ownership: header/`clientInfo`/User-Agent, a 0600 registry, and the owner a session is recorded against. |
-| [`lib/config-route.js`](lib/config-route.js) + [`lib/client.js`](lib/client.js) | Control plane: a loopback JSON route and the browser panel that reads and writes it — registered both as a first-level Settings section and as the bundle row's Configure page. |
+| [`lib/config-route.js`](lib/config-route.js) + [`lib/client.js`](lib/client.js) | Control plane: a loopback JSON route and the browser panel that reads and writes it — rendered on the bundle's own Plugins page (above its component rows) and as the row's Configure page. |
 | [`lib/transcript.js`](lib/transcript.js) | Windowed transcript reads: tail/head/outline, role and sequence filters, per-message caps and the response budget. |
 | [`work-sync.js`](work-sync.js) | The **second bundle row**: mounts task-start progress sync, publishes it as the `workSync` service, and owns its own config. |
 | [`lib/work-sync.js`](lib/work-sync.js) | The sync engine itself: who to ask, claim correlation, deadlines — built only on `session/event`. |
@@ -239,7 +239,7 @@ v0.7.0 did.
 
 | Where | What |
 |---|---|
-| Web **Plugins** page → this bundle's row → **Configure** | The switch and the surface mode. They save through the profile configuration editor, so they land in `cordis.patch.yml` exactly like a hand edit, and the row reloads. |
+| Web **Plugins** page → this bundle's page (or a row → **Configure**) | The switch and the surface mode, shown directly on the bundle page. They save through the profile configuration editor, so they land in `cordis.patch.yml` exactly like a hand edit, and the row reloads. |
 | `GET /mcp-config` (loopback only) | The current state: `exposeToDsh`, `exposeToDshMode`, the MCP URL, the published and registered names, the version. |
 | `POST /mcp-config` `{ "exposeToDsh": false }` or `{ "exposeToDshMode": "full" }` | The same writes the page performs. |
 | `POST /mcp-config` `{ "removeGroups": ["/abs/path"] }` | Drop project registrations by directory — the way to undo grouping automation. No folder, file, or Session is touched; those Sessions return to Ungrouped. |
@@ -377,9 +377,10 @@ message, no state.
 
 ## The plugin's own settings page
 
-The same panel is available in two places: as a **first-level section in the Settings dialog** (nav label
-`DSH MCP Server`, no Plugins-page drill-down), and as the bundle row's **Configure** page on the Web
-**Plugins** page. It carries every switch this plugin has, so none of them needs a YAML edit:
+The panel sits on the bundle's **own page** on the Web **Plugins** page, directly under the package title
+and above its component rows (the page shows it because the bundle registers a `plugins.bundle.config`
+entry keyed by its package name). It also remains the bundle row's **Configure** page, so either entry
+reaches the same switches. It carries every switch this plugin has, so none of them needs a YAML edit:
 
 | Control | Writes |
 |---|---|
@@ -390,7 +391,8 @@ The same panel is available in two places: as a **first-level section in the Set
 | Task-start progress sync: on / off | `syncOnStart` on the `dsh-work-sync` row |
 
 Each control saves through the profile configuration editor and reloads this plugin's row, exactly as a
-hand edit would.
+hand edit would. The panel styles itself with DSH's own `--dsw-*` theme tokens (with neutral fallbacks), so it
+follows light/dark and the Harness accent instead of shipping a palette of its own.
 
 The route is loopback-only **and** browser-hardened: a request carrying a foreign `Origin`/`Sec-Fetch-Site`
 is refused through DSH's own connection fence, the body must be `application/json`, unknown fields are
@@ -620,7 +622,7 @@ node test/transcript-test.mjs          # 7 checks: transcript windows, cursors, 
 node test/work-sync-test.mjs           # 18 checks: the progress-sync engine against a fake Harness
 node test/work-sync-plugin-test.mjs    # 5 checks: the sync bundle row's service, messages, switch, disposal
 node test/turn-wait-test.mjs          # 2 checks: which turn a queued or steered prompt reports
-node test/client-half-test.mjs         # 18 checks: the browser half's row page, its Settings section, its route
+node test/client-half-test.mjs         # 18 checks: the browser half's bundle page, its row page, its route
 node test/plugin-integration-test.mjs  # 121 checks: apply(), endpoint file + advertised URL, tools,
                                        # transcript windows, outline/paging/truncation, search, index
                                        # cursors, pending user decisions (PTC included), parked approvals

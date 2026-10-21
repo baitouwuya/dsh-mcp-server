@@ -58,21 +58,20 @@ const ctx = {
 }
 exported.apply(ctx)
 
-assert.equal(registrations.length, 2, 'the client half registers the row page and a first-level settings section')
+assert.equal(registrations.length, 2, 'the client half registers the bundle page and the row page')
 const page = registrations.find((entry) => entry.options.name === 'plugins.row.config')
-const section = registrations.find((entry) => entry.options.name === 'settings.section')
-assert.ok(page, 'the Plugins page entry is registered')
+const bundle = registrations.find((entry) => entry.options.name === 'plugins.bundle.config')
+assert.ok(page, 'the row page entry is registered')
 assert.equal(page.options.key, '@local/dsh-mcp-server#dsh-mcp-server', 'keyed by package and row id')
 checks.push('the page registers into the Plugins page under this bundle row')
 
-// The same panel is a first-level Settings section: a list-slot entry with an
-// id, an order and a nav label, so the switches are not two levels deep.
-assert.ok(section, 'a settings.section entry is registered')
-assert.equal(section.options.id, 'dsh-mcp-server')
-assert.equal(typeof section.options.order, 'number')
-assert.equal(typeof section.options.label, 'string', 'the nav label is resolvable text')
-assert.equal(section.options.locale, 'dshMcpServer')
-checks.push('the same panel registers as a first-level Settings section')
+// The bundle's own page shows the panel directly, above its component rows: the
+// Plugins page renders plugins.bundle.config for the package whose name keys the
+// entry, so no row drill-down is needed to reach the switches.
+assert.ok(bundle, 'a plugins.bundle.config entry is registered')
+assert.equal(bundle.options.key, '@local/dsh-mcp-server', 'keyed by package name, as the bundle page looks it up')
+assert.equal(bundle.options.locale, 'dshMcpServer')
+checks.push('the same panel registers on the bundle page itself')
 
 assert.equal(page.component({ view: 'summary' }), page.component({ view: 'summary' }))
 assert.equal(typeof page.component({ view: 'summary' }), 'string')
@@ -110,12 +109,13 @@ for (const expected of ['Surface', 'On demand', 'All at once', 'Sidebar projects
 }
 checks.push('the settings page renders every control it offers')
 
-const sectionT = (key) => ({ sectionIntro: 'intro-copy' }[key] ?? key)
-const sectionElement = panelParts.get('settings.section')({ t: sectionT })
-const sectionLabels = collectText(sectionElement.type(sectionElement.props))
-assert.ok(sectionLabels.includes('intro-copy'), 'the section explains what it configures')
-assert.ok(sectionLabels.includes('syncLabel'), 'and offers the same controls')
-checks.push('the first-level Settings section renders the panel with its own introduction')
+const bundleT = (key) => ({ bundleIntro: 'intro-copy' }[key] ?? key)
+const bundleElement = panelParts.get('plugins.bundle.config')({ t: bundleT })
+const bundleLabels = collectText(bundleElement.type(bundleElement.props))
+assert.ok(bundleLabels.includes('intro-copy'), 'the bundle page explains what it configures')
+assert.ok(bundleLabels.includes('syncLabel'), 'and offers the same controls')
+assert.ok(bundleLabels.includes('switchLabel'), 'including the labelled surface switch')
+checks.push('the bundle page renders the panel with its own introduction and labelled switch')
 
 // Every switch must be operable: a truthy `disabled` left a page whose main
 // enable toggle could never be clicked.
