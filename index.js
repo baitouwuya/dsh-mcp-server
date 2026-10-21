@@ -27,7 +27,7 @@ import { createWorkSync } from './lib/work-sync.js'
 import { groupOwnedSessions } from './lib/workspace-grouping.js'
 
 /** Keep in sync with package.json; reported through `initialize`. */
-const VERSION = '0.11.4'
+const VERSION = '0.11.5'
 
 /** This package's own name, as the profile's bundle row spells it. */
 const PACKAGE_NAME = (() => {
@@ -453,6 +453,11 @@ export function apply(ctx, config = {}) {
       : undefined,
   })
 
+  // The settings route has its own, much smaller ceiling: its payload is a
+  // switch patch, not a tool call. `configMaxBodyBytes` is clamped by the route
+  // itself (1 KB - 1 MB, 4 KB by default), so a malformed value cannot widen it.
+  const configMaxBodyBytes = config.configMaxBodyBytes
+
   const disposeRoute = ctx.webServer.register({ kind: 'exact', path, handler })
 
   /**
@@ -623,6 +628,7 @@ export function apply(ctx, config = {}) {
         queueSession: queueOpenSession,
         ackCommand: async () => { guiCommand = undefined },
         trust: configTrust,
+        maxBodyBytes: configMaxBodyBytes,
         logger: log,
       }),
     })

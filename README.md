@@ -431,7 +431,8 @@ The bundle row in `cordis.patch.yml` accepts (all optional):
 | `syncCooldownMs` | `300000` | How long one session waits before asking the same peer again. |
 | `syncWaitMs` | `120000` | How long a peer's report is awaited before the asker is told it is still working. |
 | `syncMaxPeers` | `3` | How many peers one round may ask. |
-| `maxBodyBytes` | `8388608` | Request body ceiling. |
+| `maxBodyBytes` | `8388608` | Request body ceiling of the MCP endpoint. |
+| `configMaxBodyBytes` | `4096` | Request body ceiling of the loopback configuration route. Separate from `maxBodyBytes` on purpose: that route only ever receives a switch patch, so it keeps a much smaller ceiling. Clamped to 1 KB - 1 MB; a value outside the range (or a non-number) is ignored. |
 | `instructions` | built-in text | Replaces the instructions handed to the calling model. |
 
 Example row:
@@ -555,7 +556,7 @@ private profile, with the token the server is configured with.
 node test/mcp-self-test.mjs            # 11 transport checks, no Harness needed
 node test/work-sync-test.mjs           # 16 checks: the progress-sync engine against a fake Harness
 node test/turn-wait-test.mjs          # 2 checks: which turn a queued or steered prompt reports
-node test/client-half-test.mjs         # 14 checks: the browser half's row page, its settings, its route
+node test/client-half-test.mjs         # 16 checks: the browser half's row page, its settings, its route
 node test/plugin-integration-test.mjs  # 123 checks: apply(), endpoint file + advertised URL, tools,
                                        # transcript windows, outline/paging/truncation, search, index
                                        # cursors, pending user decisions (PTC included), parked approvals

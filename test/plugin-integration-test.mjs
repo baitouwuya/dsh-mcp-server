@@ -497,7 +497,7 @@ let sessionIdFromRun
 const disposers = []
 const ctx = makeContext(services, disposers)
 
-apply(ctx, { token: 'integration-token', endpointFile, url: 'http://127.0.0.1:9', dshHome: dir, clientsFlushMs: 20 })
+apply(ctx, { token: 'integration-token', endpointFile, url: 'http://127.0.0.1:9', dshHome: dir, clientsFlushMs: 20, configMaxBodyBytes: 2048 })
 
 const mcpRoute = webServer.registered.find((entry) => entry.path === '/mcp')
 const configRoute = webServer.registered.find((entry) => entry.path === '/mcp-config')
@@ -1640,6 +1640,8 @@ try {
     body: JSON.stringify({ openSession: 'x'.repeat(5000) }),
   })
   assert.equal(oversized.status, 413, 'an oversized body gets a 413, not a reset socket')
+  const oversizedBody = await oversized.json()
+  assert.match(String(oversizedBody.error), /2048/, 'the ceiling is the configured one, not the built-in default')
   checks.push('the configuration route rejects a non-boolean, an unknown mode, an empty patch, a relative path, unknown fields, non-JSON bodies, foreign origins, and oversized bodies')
 
   // Undoing automation: a project registration can be dropped deliberately.

@@ -181,6 +181,35 @@ assert.equal(reread.exposeToDsh, false, 'a later read sees the saved value')
 assert.equal(reread.exposeToDshMode, 'full', 'a later read sees the saved mode')
 checks.push('a saved setting is what the next read reports')
 
+// The POST ceiling belongs to the route and is configurable: the default is
+// tiny, and a deployment that needs more can raise it.
+const oversizedDefault = await fetch(base, {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ openSession: 'x'.repeat(5000) }),
+})
+assert.equal(oversizedDefault.status, 413, 'a body past the default ceiling is refused')
+assert.match(String((await oversizedDefault.json()).error), /4096/, 'the refusal names the default ceiling')
+checks.push('the configuration route refuses a body past its default 4 KB ceiling')
+
+const raisedHandler = createConfigHandler({
+  snapshot: () => ({ exposeToDsh: true, exposeToDshMode: 'lazy', busyMode: 'setting', published: [], registered: [], command: null }),
+  write: async () => {},
+  maxBodyBytes: 8192,
+})
+const raisedServer = createServer((req, res) => { void raisedHandler(req, res) })
+await new Promise((resolve) => raisedServer.listen(0, '127.0.0.1', resolve))
+const raisedBase = `http://127.0.0.1:${raisedServer.address().port}`
+const raised = await fetch(raisedBase, {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ openSession: 'x'.repeat(5000) }),
+})
+assert.equal(raised.status, 400, 'a raised ceiling lets the same body reach validation')
+assert.match(String((await raised.json()).error), /session id/, 'it is refused for its content, not its size')
+await new Promise((resolve) => raisedServer.close(resolve))
+checks.push('a raised configMaxBodyBytes reaches the route option and changes the ceiling')
+
 await new Promise((resolve) => server.close(resolve))
 console.log(`${checks.length} client half checks passed`)
 for (const check of checks) console.log(`ok - ${check}`)
