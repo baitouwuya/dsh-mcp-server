@@ -114,8 +114,8 @@ const bundleElement = panelParts.get('plugins.bundle.config')({ t: bundleT })
 const bundleLabels = collectText(bundleElement.type(bundleElement.props))
 assert.ok(bundleLabels.includes('intro-copy'), 'the bundle page explains what it configures')
 assert.ok(bundleLabels.includes('syncLabel'), 'and offers the same controls')
-assert.ok(bundleLabels.includes('switchLabel'), 'including the labelled surface switch')
-checks.push('the bundle page renders the panel with its own introduction and labelled switch')
+assert.ok(bundleLabels.includes('sectionTitle'), 'including the surface row title')
+checks.push('the bundle page renders the panel with its own introduction and the settings rows')
 
 // Every switch must be operable: a truthy `disabled` left a page whose main
 // enable toggle could never be clicked.

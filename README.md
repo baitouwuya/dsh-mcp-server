@@ -391,8 +391,10 @@ reaches the same switches. It carries every switch this plugin has, so none of t
 | Task-start progress sync: on / off | `syncOnStart` on the `dsh-work-sync` row |
 
 Each control saves through the profile configuration editor and reloads this plugin's row, exactly as a
-hand edit would. The panel styles itself with DSH's own `--dsw-*` theme tokens (with neutral fallbacks), so it
-follows light/dark and the Harness accent instead of shipping a palette of its own.
+hand edit would. The panel uses the Harness's own settings-row layout — a 14px title over a 12px description on
+the left, the control on the right, hairline separators — and every colour, radius and separator comes from
+DSH's `--dsw-*` theme tokens (with neutral fallbacks), so it follows light/dark and the accent instead of
+shipping a palette of its own.
 
 The route is loopback-only **and** browser-hardened: a request carrying a foreign `Origin`/`Sec-Fetch-Site`
 is refused through DSH's own connection fence, the body must be `application/json`, unknown fields are
