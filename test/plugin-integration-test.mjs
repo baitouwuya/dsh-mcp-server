@@ -1720,73 +1720,21 @@ try {
   assert.ok(!endpoint.stdioBridge.includes('/bin/bin/'))
   checks.push('the published endpoint file carries the exact stdio bridge path')
 
-  // --- task-start work sync ----------------------------------------------------
-  // One question per top-level agent, same workspace only, and the asker never
-  // waits for the answer.
-  const syncHandler = ctx.hooks.get('session/event')
-  assert.equal(typeof syncHandler, 'function', 'the plugin subscribes to session events for work sync')
-  addSyntheticSessions([
-    { sessionId: 'session-sync-asker', running: true, cwd: '/tmp/sync-ws' },
-    { sessionId: 'session-sync-peer', running: true, cwd: '/tmp/sync-ws' },
-    { sessionId: 'session-sync-child', running: true, cwd: '/tmp/sync-ws', parentSessionId: 'session-sync-asker' },
-    { sessionId: 'session-sync-elsewhere', running: true, cwd: '/tmp/other-ws' },
-  ])
-  const syncTick = () => new Promise((resolve) => setTimeout(resolve, 40))
-  const messagesTo = (id) => injectedMessages().filter((row) => row.sessionId === id)
-  const asker = { id: 'session-sync-asker', header: { id: 'session-sync-asker', cwd: '/tmp/sync-ws' } }
-  syncHandler(asker, { type: 'turn/start', data: { turn: 1 } })
-  await syncTick()
-  const notices = messagesTo('session-sync-peer')
-  assert.equal(notices.length, 1, 'a starting task asks the other running agent in this workspace exactly once')
-  assert.match(notices[0].message.content[0].text, /进度同步/)
-  assert.equal(notices[0].message.source.kind, 'dsh-mcp-server')
-  assert.equal(notices[0].message.source.sessionId, 'session-sync-asker', 'the notice names the session it came from')
-  assert.equal(messagesTo('session-sync-child').length, 0, 'a sub-agent is never questioned directly')
-  assert.equal(messagesTo('session-sync-elsewhere').length, 0, 'another workspace is never asked')
-  checks.push('work sync asks one question per top-level agent, and only inside this workspace')
-
-  // The turn a notice causes is not a task start, so a peer answering cannot ask back.
-  const totalBefore = injectedMessages().length
-  syncHandler({ id: 'session-sync-peer', header: { id: 'session-sync-peer', cwd: '/tmp/sync-ws' } }, { type: 'turn/start', data: { turn: 1 } })
-  await syncTick()
-  assert.equal(injectedMessages().length, totalBefore, 'the turn a notice caused starts no round of its own')
-  checks.push('a notice never triggers another notice')
-
-  // An assistant message produced before the peer has claimed the notice is the
-  // peer's pre-notice work, not its answer.
-  syncHandler(
-    { id: 'session-sync-peer' },
-    { type: 'assistant/message', data: { turn: 1, step: 1, message: { role: 'assistant', content: [{ type: 'text', text: '我先在读旧文件' }] } } },
-  )
-  await syncTick()
-  assert.equal(messagesTo('session-sync-asker').length, 0, 'a pre-notice assistant message is not reported as an answer')
-
-  // The peer claims the notice in its own log; that is the signal that its next
-  // assistant message answers the question.
-  syncHandler(
-    { id: 'session-sync-peer' },
-    {
-      type: 'user/message',
-      data: {
-        turn: 1,
-        source: { kind: 'dsh-mcp-server', sessionId: 'session-sync-asker' },
-        content: [{ type: 'text', text: '进度同步' }],
-      },
-    },
-  )
-  await syncTick()
-
-  // The answer comes back to the asker, attributed to the session that sent it.
-  syncHandler(
-    { id: 'session-sync-peer' },
-    { type: 'assistant/message', data: { turn: 1, step: 2, message: { role: 'assistant', content: [{ type: 'text', text: '我在改 lib/x.js，排在你的改动之前' }] } } },
-  )
-  await syncTick()
-  const reports = messagesTo('session-sync-asker')
-  assert.equal(reports.length, 1, 'the peer answer reaches the asking session')
-  assert.match(reports[0].message.content[0].text, /lib\/x\.js/)
-  assert.equal(reports[0].message.source.sessionId, 'session-sync-peer')
-  checks.push('the peer answer reaches the asker only after the notice is claimed, labelled with its session')
+  // --- task-start work sync is its own bundle row -------------------------------
+  // This bundle no longer subscribes to session events: the dsh-work-sync row
+  // mounts the engine and publishes a service, and this endpoint only reads it.
+  assert.equal(ctx.hooks.get('session/event'), undefined, 'the MCP row does not subscribe to session events')
+  const statusWithoutSync = await call('dsh_status', {})
+  assert.equal(statusWithoutSync.sync.present, false, 'without the sync row the status says so')
+  assert.equal(statusWithoutSync.sync.enabled, false)
+  const syncWrite = await fetch(configUrl, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ syncOnStart: false }),
+  })
+  assert.equal(syncWrite.status, 400, 'the sync switch is refused when the row that owns it is absent')
+  assert.match(String((await syncWrite.json()).error), /dsh-work-sync/)
+  checks.push('task-start sync is a separate row: the MCP row neither subscribes nor saves its switch')
 
   // An internal caller may start a session only inside its own workspace root:
   // the session's cwd is what DSH uses as its sandbox boundary.

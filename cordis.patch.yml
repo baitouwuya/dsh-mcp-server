@@ -1,5 +1,10 @@
-# dsh-mcp-server bundle: inserts the DSH MCP Server Host plugin into the profile.
+# dsh-mcp-server bundle: inserts the DSH MCP Server Host plugin, plus the
+# task-start progress-sync row it reports on. They are separate rows so sync can
+# be reloaded, disabled, or replaced without touching the endpoint.
 - insert:
     - id: dsh-mcp-server
       name: '@local/dsh-mcp-server'
+      config: {}
+    - id: dsh-work-sync
+      name: '@local/dsh-mcp-server/work-sync'
       config: {}

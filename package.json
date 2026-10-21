@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-mcp-server",
-  "version": "0.12.1",
+  "version": "0.13.0",
   "type": "module",
   "description": "Expose DeepSeek Harness sessions, agents, and tools to any other agent harness over the Model Context Protocol.",
   "license": "MIT",
@@ -30,6 +30,7 @@
   "exports": {
     ".": "./index.js",
     "./client": "./lib/client.js",
+    "./work-sync": "./work-sync.js",
     "./package.json": "./package.json",
     "./locale/*.json": "./locale/*.json"
   },
@@ -37,10 +38,11 @@
     "dsh-mcp-stdio": "./bin/dsh-mcp-stdio.mjs"
   },
   "scripts": {
-    "test": "node test/mcp-self-test.mjs && node test/contracts-test.mjs && node test/authority-test.mjs && node test/work-sync-test.mjs && node test/turn-wait-test.mjs && node test/plugin-integration-test.mjs && node test/client-half-test.mjs"
+    "test": "node test/mcp-self-test.mjs && node test/contracts-test.mjs && node test/authority-test.mjs && node test/work-sync-test.mjs && node test/work-sync-plugin-test.mjs && node test/turn-wait-test.mjs && node test/plugin-integration-test.mjs && node test/client-half-test.mjs"
   },
   "files": [
     "index.js",
+    "work-sync.js",
     "lib",
     "bin",
     "locale",

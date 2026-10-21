@@ -49,7 +49,7 @@ function harness({ rows = [], enabled = true, cooldownMs = 300_000, waitMs = 120
     claim: (sessionId, asker) => fire({
       sessionId,
       type: 'user/message',
-      data: { source: { kind: 'dsh-mcp-server', sessionId: asker }, content: [{ type: 'text', text: 'progress sync' }] },
+      data: { source: { kind: 'dsh-work-sync', sessionId: asker }, content: [{ type: 'text', text: 'progress sync' }] },
     }),
     advance: (ms) => { clock += ms },
     settle: () => new Promise((resolve) => setTimeout(resolve, 20)),

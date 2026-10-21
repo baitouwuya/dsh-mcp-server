@@ -23,12 +23,11 @@ import { createConfigHandler } from './lib/config-route.js'
 import { createMcpHttpHandler } from './lib/http-route.js'
 import { McpGateway, SERVER_NAME } from './lib/protocol.js'
 import { registerDshTools } from './lib/dsh-tools-bridge.js'
-import { createWorkSync } from './lib/work-sync.js'
 import { groupOwnedSessions } from './lib/workspace-grouping.js'
-import { assistantTextOf } from './lib/dsh-contracts.js'
+import { errorText } from './lib/dsh-contracts.js'
 
 /** Keep in sync with package.json; reported through `initialize`. */
-const VERSION = '0.12.1'
+const VERSION = '0.13.0'
 
 /** This package's own name, as the profile's bundle row spells it. */
 const PACKAGE_NAME = (() => {
@@ -159,22 +158,15 @@ export function apply(ctx, config = {}) {
    */
   const createGroups = config.createGroups === true
   /**
-   * Sync a starting task with the other agents working in the same workspace.
+   * The row that owns task-start progress sync.
    *
-   * On by default: two sessions editing one tree is exactly the collision this
-   * avoids, and a deployment running one agent at a time pays nothing for it —
-   * no running peer in this workspace means no notice is ever sent.
+   * Sync is its own bundle row now (`@local/dsh-mcp-server/work-sync`); this
+   * bundle only reads the service for the settings page and `dsh_status`, and
+   * writes the one switch through the profile editor.
    */
-  const syncOnStart = config.syncOnStart !== false
-  const syncCooldownMs = Number.isFinite(Number(config.syncCooldownMs))
-    ? Math.max(0, Number(config.syncCooldownMs))
-    : 300_000
-  const syncWaitMs = Number.isFinite(Number(config.syncWaitMs))
-    ? Math.max(1000, Number(config.syncWaitMs))
-    : 120_000
-  const syncMaxPeers = Number.isFinite(Number(config.syncMaxPeers))
-    ? Math.max(1, Math.min(20, Number(config.syncMaxPeers)))
-    : 3
+  const syncEntryId = typeof config.syncEntryId === 'string' && config.syncEntryId
+    ? config.syncEntryId
+    : 'dsh-work-sync'
   /**
    * How a prompt is delivered to a session that is already running.
    *
@@ -290,8 +282,40 @@ export function apply(ctx, config = {}) {
     ...(dshToolsState.via ? { via: dshToolsState.via } : {}),
   })
 
-  /** Live work-sync state; the engine replaces this once it is built below. */
-  let workSyncStatus = () => ({ enabled: syncOnStart })
+  /**
+   * The work-sync row's service, when that bundle is installed and loaded.
+   *
+   * Absent is a normal state: a profile may run this endpoint without the
+   * sync row, in which case the settings page reports it and refuses to save
+   * the switch with a message that names the row to add.
+   */
+  function workSyncService() {
+    try {
+      const service = ctx.get('workSync')
+      return service && typeof service.status === 'function' ? service : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  /** What `dsh_status.sync` reports: the service's lossless snapshot. */
+  function workSyncStatus() {
+    const service = workSyncService()
+    if (!service) return { enabled: false, present: false }
+    try {
+      return { ...service.status(), present: true }
+    } catch (error) {
+      log('debug', 'work-sync status failed', { error: errorText(error) })
+      return { enabled: false, present: true }
+    }
+  }
+
+  /** The switch's current value: the service's config, else the legacy row key. */
+  function syncOnStartValue() {
+    const service = workSyncService()
+    if (service?.config && typeof service.config.enabled === 'boolean') return service.config.enabled
+    return config.syncOnStart !== false
+  }
 
   const capabilities = createDshCapabilities(ctx, {
     logger: log,
@@ -327,44 +351,6 @@ export function apply(ctx, config = {}) {
     dshToolsState.names = registered.names
     dshToolsState.via = registered.via
   }
-
-  /**
-   * The session rows work-sync reasons about: who is running, in which
-   * workspace, and under which top-level agent.
-   */
-  async function syncSessionRows() {
-    const controller = ctx.get('sessionController')
-    if (typeof controller?.list !== 'function') return []
-    const listed = await controller.list({})
-    const items = Array.isArray(listed?.items) ? listed.items : []
-    return items.map((item) => ({
-      sessionId: item.sessionId,
-      running: item.running === true,
-      ...(typeof item.cwd === 'string' ? { cwd: item.cwd } : {}),
-      ...(Number.isFinite(Number(item.updatedAt)) ? { updatedAt: Number(item.updatedAt) } : {}),
-      ...(typeof item.parentSessionId === 'string' ? { parentSessionId: item.parentSessionId } : {}),
-      ...(typeof item.origin === 'string' ? { origin: item.origin } : {}),
-    }))
-  }
-
-  /**
-   * Ask the other top-level agents in this workspace what they are touching,
-   * without ever waiting for the answer.
-   */
-  const workSync = createWorkSync({
-    ctx,
-    settings: { enabled: syncOnStart, cooldownMs: syncCooldownMs, waitMs: syncWaitMs, maxPeers: syncMaxPeers },
-    logger: log,
-    listSessions: syncSessionRows,
-    deliver: (sessionId, message) => capabilities.deliverInternalMessage(sessionId, message?.text, message?.meta),
-    readAssistant: assistantTextOf,
-    now: () => Date.now(),
-  })
-  workSyncStatus = () => workSync.status()
-  ctx.effect(() => {
-    workSync.start()
-    return () => workSync.dispose()
-  }, 'dsh-mcp-server: task-start work sync')
 
   const gateway = new McpGateway({
     serverInfo: { name: SERVER_NAME, title: 'DeepSeek Harness MCP Server', version: VERSION },
@@ -491,17 +477,9 @@ export function apply(ctx, config = {}) {
       groupSessions,
       createGroups,
       busyMode,
-      syncOnStart,
-      syncCooldownMs,
-      syncWaitMs,
-      syncMaxPeers,
-      sync: (() => {
-        try {
-          return workSyncStatus()
-        } catch {
-          return { enabled: syncOnStart }
-        }
-      })(),
+      syncOnStart: syncOnStartValue(),
+      syncRowId: syncEntryId,
+      sync: workSyncStatus(),
       url: `${resolveBaseUrl()}${path}`,
       clientPage: clientPageState(),
       // What "follow the setting" currently resolves to, so the page can show it.
@@ -586,11 +564,42 @@ export function apply(ctx, config = {}) {
   }
 
   /**
+   * Save the one sync switch on the row that owns the behaviour.
+   *
+   * Sync is its own bundle row, so its config is edited there; a profile
+   * without that row gets a message naming what to add instead of a silent
+   * no-op. `expose` marks the failure as a refusal the settings page may show
+   * verbatim, rather than an internal error it must hide.
+   */
+  async function writeSyncRow(patch) {
+    const editor = ctx.get('configEditor')
+    if (typeof editor?.entries !== 'function' || typeof editor.edit !== 'function') {
+      const error = new Error('This Harness exposes no profile configuration editor, so task-start sync cannot be switched here. Set syncOnStart on the dsh-work-sync row in cordis.patch.yml and restart DSH.')
+      error.expose = true
+      throw error
+    }
+    const rows = [...(editor.entries() ?? [])]
+    const entry = rows.find((row) => row?.options?.id === syncEntryId)
+    if (!entry) {
+      const seen = rows.map((row) => row?.options?.id).filter(Boolean).join(', ')
+      const error = new Error(`The "${syncEntryId}" row is not in this profile's patch (saw: ${seen || 'no rows'}), so task-start sync cannot be switched here. Add the @local/dsh-mcp-server/work-sync bundle row, or edit cordis.patch.yml directly.`)
+      error.expose = true
+      throw error
+    }
+    await editor.edit(entry, (current) => ({ ...(current && typeof current === 'object' ? current : {}), ...patch }))
+    return patch
+  }
+
+  /**
    * Save one validated patch through the Harness configuration editor, so the
    * profile's `cordis.patch.yml` stays the one source of truth and the row
    * reloads exactly as a hand edit would.
    */
   async function writeDshSurface(patch) {
+    // The sync switch belongs to another row; everything else is this one.
+    const { syncOnStart, ...surface } = patch
+    if (syncOnStart !== undefined) await writeSyncRow({ syncOnStart })
+    if (Object.keys(surface).length === 0) return patch
     const editor = ctx.get('configEditor')
     if (typeof editor?.entries !== 'function' || typeof editor.edit !== 'function') {
       throw new Error('This Harness exposes no profile configuration editor, so this setting cannot be saved here. Set it on the dsh-mcp-server row in cordis.patch.yml and restart DSH.')
@@ -603,7 +612,7 @@ export function apply(ctx, config = {}) {
       const seen = rows.map((row) => row?.options?.id).filter(Boolean).join(', ')
       throw new Error(`The "${entryId}" row is not addressable in this profile's patch (saw: ${seen || 'no rows'}), so the switch cannot be saved here. Edit cordis.patch.yml directly.`)
     }
-    await editor.edit(entry, (current) => ({ ...(current && typeof current === 'object' ? current : {}), ...patch }))
+    await editor.edit(entry, (current) => ({ ...(current && typeof current === 'object' ? current : {}), ...surface }))
     return patch
   }
 
