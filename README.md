@@ -20,6 +20,31 @@ other harness ──MCP (Streamable HTTP or stdio)──> DSH MCP Server ──>
                                                                      sessionController / sessionQuery / tools
 ```
 
+## Architecture
+
+The plugin is an adapter between two contracts: MCP on the outside, DSH services on the inside. Nothing it
+ships imports a DSH package, so every layer talks through `ctx` and plain data.
+
+| Module | Role |
+|---|---|
+| [`index.js`](index.js) | Composition root: reads the row config, registers the routes and the local tools, and owns one `ctx.effect` per resource so a reload unwinds exactly what it created. |
+| [`lib/protocol.js`](lib/protocol.js) | MCP wire: JSON-RPC envelope, protocol-version negotiation, error codes, gateway dispatch. |
+| [`lib/http-route.js`](lib/http-route.js) / [`bin/dsh-mcp-stdio.mjs`](bin/dsh-mcp-stdio.mjs) | The two transports: Streamable HTTP on the Harness listener, and a stdio bridge that forwards to that same endpoint. |
+| [`lib/dsh-capabilities.js`](lib/dsh-capabilities.js) | The DSH-facing tools and resources; each maps onto live services (`sessionController`, `sessionQuery`, `tools`, …). |
+| [`lib/authority.js`](lib/authority.js) | The authority arithmetic those tools are clamped by: the sandbox ladder, workspace containment, and the `cwd` clamp. |
+| [`lib/dsh-contracts.js`](lib/dsh-contracts.js) | The Harness wire shapes the plugin reads and writes — session ids, message prose, transcript rows, turns, failure text — the one place the hand-spelled contracts live. |
+| [`lib/dsh-tools-bridge.js`](lib/dsh-tools-bridge.js) | The same table exposed *into* DSH: the three-tool front door or the full registry, registered in the calling agent's scope. |
+| [`lib/clients.js`](lib/clients.js) | Caller identity and session ownership: header/`clientInfo`/User-Agent, a 0600 registry, and the owner a session is recorded against. |
+| [`lib/config-route.js`](lib/config-route.js) + [`lib/client.js`](lib/client.js) | Control plane: a loopback JSON route and the Plugins-page panel that reads and writes it. |
+| [`lib/work-sync.js`](lib/work-sync.js) | Task-start progress sync between agents in one workspace, built only on `session/event`. |
+| [`lib/workspace-grouping.js`](lib/workspace-grouping.js) | Put a session this endpoint starts into the sidebar project its directory already has. |
+
+Three rules keep the layering honest. **Services, not re-implementations**: transcript reads replay the durable
+event log, permissions come from `permissionPresets`, sidebar membership from `workspaceRegistry`. **Narrow
+seams**: the transport never touches a session, and the capabilities never touch a socket. **Only own state on
+disk**: everything this plugin persists is `$DSH_HOME/mcp/*.json` at mode 0600 — never a session, a transcript,
+or a setting DSH already owns.
+
 ## What it exposes
 
 | MCP tool | Purpose |
@@ -552,10 +577,30 @@ The committed `cordis.patch.yml` carries **no literal token** (this is a public 
 `DSH_MCP_TOKEN` in the Harness environment, or patch the `mcp-dsh-selfcheck` row from your own
 private profile, with the token the server is configured with.
 
+## Model Experience
+
+What a calling model sees, and why it was shaped that way:
+
+- **`initialize` instructions are the map, not a tool dump.** They say which tool starts a session and which
+  continues one, when to use `wait: false` + `dsh_wait_session` (waiting never cancels), that reads are windows
+  (`mode`/`maxChars`/`afterSeq`) rather than dumps, and that approvals and questions are reported per session
+  and answerable only when the deployment enables `answerUserRequests`.
+- **Descriptions carry what a schema cannot.** `dsh_run_command(sessionId, line|command)` says its two shapes in
+  the signature because a model that follows a wrong one is worse off than a model given none.
+- **Failures are typed.** An unknown tool or a malformed resource id is `-32602 invalidParams`; a normal tool
+  failure is an `isError` result that does not end the turn. Messages say what to do next ("retry with
+  `stopActivity: true`", "raise this session's preset in the Harness GUI") instead of leaking a stack.
+- **The surface is load-aware.** `exposeToDshMode: lazy` gives a DSH session three tools plus a catalogue that
+  already carries every published name and its required arguments; `full` puts all eighteen in the prompt.
+- **Status is one call.** `dsh_status` answers "what am I talking to" — endpoint, versions, live model
+  selection, delivery policy, sync state, tool-table shape — without probing.
+
 ## Verification
 
 ```bash
 node test/mcp-self-test.mjs            # 11 transport checks, no Harness needed
+node test/contracts-test.mjs           # 6 checks: the Harness wire shapes, pinned in one place
+node test/authority-test.mjs           # 5 checks: the sandbox ladder, containment, and the cwd clamp
 node test/work-sync-test.mjs           # 18 checks: the progress-sync engine against a fake Harness
 node test/turn-wait-test.mjs          # 2 checks: which turn a queued or steered prompt reports
 node test/client-half-test.mjs         # 16 checks: the browser half's row page, its settings, its route
@@ -612,6 +657,12 @@ and the stdio bridge.
   another session. It is not queued behind a running turn and it can mutate session state
   (`/permission`), so it carries the same authority as typing the command in the GUI; `dsh_list_commands`
   first is the way to know what a session accepts.
+- **Task-start sync lives in this bundle, not in its own row.** It is built only on `session/event` and its
+  state is in memory, so a reload drops questions that were still open. Splitting it into its own bundle row
+  is the natural next step; until then it shares this plugin's lifecycle and its row config.
+- **The settings page keeps the default route and row key.** `configPath`/`entryId` change where the Host serves
+  the route and which row is written, but the browser half is built with `/mcp-config` and
+  `<package>#<row id>`; a renamed route or row needs a matching build.
 - **The local surface needs the Harness tool registry.** `ctx.tools` (`@deepseek-ai/dsh-tools`) is
   composed in every shipped profile; without it the tools simply stay MCP-only and the log says so.
 - **Adding the browser half needs a restart.** The Host half's tools land when the row reloads, but

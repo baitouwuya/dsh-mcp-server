@@ -25,9 +25,10 @@ import { McpGateway, SERVER_NAME } from './lib/protocol.js'
 import { registerDshTools } from './lib/dsh-tools-bridge.js'
 import { createWorkSync } from './lib/work-sync.js'
 import { groupOwnedSessions } from './lib/workspace-grouping.js'
+import { assistantTextOf } from './lib/dsh-contracts.js'
 
 /** Keep in sync with package.json; reported through `initialize`. */
-const VERSION = '0.11.6'
+const VERSION = '0.12.0'
 
 /** This package's own name, as the profile's bundle row spells it. */
 const PACKAGE_NAME = (() => {
@@ -325,17 +326,6 @@ export function apply(ctx, config = {}) {
     const registered = registerDshTools({ ctx, capabilities, logger: log, mode: exposeToDshMode })
     dshToolsState.names = registered.names
     dshToolsState.via = registered.via
-  }
-
-  /** The prose of one assistant message event, or nothing when it carries none. */
-  function assistantTextOf(event) {
-    const content = Array.isArray(event?.data?.message?.content) ? event.data.message.content : []
-    const text = content
-      .filter((block) => block?.type === 'text' && typeof block.text === 'string')
-      .map((block) => block.text)
-      .join('\n')
-      .trim()
-    return text ? text : undefined
   }
 
   /**
