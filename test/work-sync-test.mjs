@@ -123,6 +123,34 @@ assert.match(report.text, /\/work\/lib\/x\.js/)
 assert.match(report.text, /协商/)
 checks.push('notice, claim, answer and report complete one round without starting another')
 
+// --- a finished asker is not woken ------------------------------------------
+// The report can only influence work that is still running: once the asker's
+// turn ends, the pair is dropped instead of opening a turn in a session its
+// caller believed idle.
+const finished = harness({ rows: world })
+await finished.turn('asker')
+await finished.settle()
+assert.equal(finished.delivered.length, 1)
+await finished.end('asker', 1)
+await finished.settle()
+await finished.claim('peer', 'asker')
+await finished.settle()
+await finished.message('peer', 'I am editing /work/lib/x.js first', 1, 1)
+await finished.settle()
+assert.deepEqual(ids(finished.delivered), ['peer'], 'an answer is not delivered to an asker whose turn already ended')
+assert.deepEqual(finished.sync.status().pending, [], 'the dropped question leaves no pair behind')
+checks.push('a report is dropped, not delivered, when the asker\'s turn has already ended')
+
+// The deadline note is the second way an idle session could be woken: a pair
+// whose asker finished must not leave a timer behind either.
+const quiet = harness({ rows: world, waitMs: 25 })
+await quiet.turn('asker')
+await quiet.settle()
+await quiet.end('asker', 1)
+await new Promise((resolve) => setTimeout(resolve, 80))
+assert.deepEqual(ids(quiet.delivered), ['peer'], 'a finished asker gets no timeout note')
+checks.push('a finished asker is not woken by a timeout note')
+
 // --- the cooldown -----------------------------------------------------------
 const cooled = harness({ rows: world })
 await cooled.turn('asker', 1)

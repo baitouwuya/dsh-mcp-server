@@ -306,7 +306,9 @@ agents working in the **same workspace** what they are doing and which files the
   That is not configurable: crossing workspaces cannot prevent a collision.
 - **The asker does not wait.** It keeps thinking. When the peer answers — its next assistant message — the
   text reaches the asker as a message labelled with the session that sent it, telling it to adjust its order
-  and, if the work is duplicate or conflicting, to negotiate with that peer before continuing.
+  and, if the work is duplicate or conflicting, to negotiate with that peer before continuing. A report is
+  only handed over while the asker is still working: once its turn has ended, the question is dropped, so a
+  finished session is never woken by a late answer or a timeout note.
 - **An answer is only an answer once the peer has seen the notice.** The engine waits for the sourced
   `user/message` the peer's own log records when it claims the notice, and only then treats the next
   assistant message as the report; text already in flight when the notice arrived is not mistaken for it.
@@ -554,7 +556,7 @@ private profile, with the token the server is configured with.
 
 ```bash
 node test/mcp-self-test.mjs            # 11 transport checks, no Harness needed
-node test/work-sync-test.mjs           # 16 checks: the progress-sync engine against a fake Harness
+node test/work-sync-test.mjs           # 18 checks: the progress-sync engine against a fake Harness
 node test/turn-wait-test.mjs          # 2 checks: which turn a queued or steered prompt reports
 node test/client-half-test.mjs         # 16 checks: the browser half's row page, its settings, its route
 node test/plugin-integration-test.mjs  # 123 checks: apply(), endpoint file + advertised URL, tools,
