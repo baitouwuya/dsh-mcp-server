@@ -58,11 +58,21 @@ const ctx = {
 }
 exported.apply(ctx)
 
-assert.equal(registrations.length, 1, 'the page registers exactly one slot entry')
-const page = registrations[0]
-assert.equal(page.options.name, 'plugins.row.config', 'it configures a plugin row')
+assert.equal(registrations.length, 2, 'the client half registers the row page and a first-level settings section')
+const page = registrations.find((entry) => entry.options.name === 'plugins.row.config')
+const section = registrations.find((entry) => entry.options.name === 'settings.section')
+assert.ok(page, 'the Plugins page entry is registered')
 assert.equal(page.options.key, '@local/dsh-mcp-server#dsh-mcp-server', 'keyed by package and row id')
 checks.push('the page registers into the Plugins page under this bundle row')
+
+// The same panel is a first-level Settings section: a list-slot entry with an
+// id, an order and a nav label, so the switches are not two levels deep.
+assert.ok(section, 'a settings.section entry is registered')
+assert.equal(section.options.id, 'dsh-mcp-server')
+assert.equal(typeof section.options.order, 'number')
+assert.equal(typeof section.options.label, 'string', 'the nav label is resolvable text')
+assert.equal(section.options.locale, 'dshMcpServer')
+checks.push('the same panel registers as a first-level Settings section')
 
 assert.equal(page.component({ view: 'summary' }), page.component({ view: 'summary' }))
 assert.equal(typeof page.component({ view: 'summary' }), 'string')
@@ -81,12 +91,13 @@ const renderingReact = {
   useCallback: (callback) => callback,
 }
 const panelHost = spec.factory(() => renderingReact)
-const panelPage = (() => {
-  const registered = []
-  const slots = { inject: (_name, callback) => { callback(); return () => {} }, register: (options, component) => { registered.push(component); return () => {} } }
+const panelParts = (() => {
+  const registered = new Map()
+  const slots = { inject: (_name, callback) => { callback(); return () => {} }, register: (options, component) => { registered.set(options.name, component); return () => {} } }
   panelHost.apply({ get: (name) => (name === 'slots' ? slots : undefined), effect: (create) => create() })
-  return registered[0]
+  return registered
 })()
+const panelPage = panelParts.get('plugins.row.config')
 const collectText = (node) => {
   if (node === null || node === undefined || typeof node === 'boolean') return []
   if (typeof node === 'string' || typeof node === 'number') return [String(node)]
@@ -98,6 +109,13 @@ for (const expected of ['Surface', 'On demand', 'All at once', 'Sidebar projects
   assert.ok(labels.includes(expected), `the settings page must offer "${expected}"`)
 }
 checks.push('the settings page renders every control it offers')
+
+const sectionT = (key) => ({ sectionIntro: 'intro-copy' }[key] ?? key)
+const sectionElement = panelParts.get('settings.section')({ t: sectionT })
+const sectionLabels = collectText(sectionElement.type(sectionElement.props))
+assert.ok(sectionLabels.includes('intro-copy'), 'the section explains what it configures')
+assert.ok(sectionLabels.includes('syncLabel'), 'and offers the same controls')
+checks.push('the first-level Settings section renders the panel with its own introduction')
 
 // Every switch must be operable: a truthy `disabled` left a page whose main
 // enable toggle could never be clicked.

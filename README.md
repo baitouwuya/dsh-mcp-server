@@ -35,7 +35,8 @@ ships imports a DSH package, so every layer talks through `ctx` and plain data.
 | [`lib/dsh-contracts.js`](lib/dsh-contracts.js) | The shape of the events and messages the tools read: session ids, message prose, transcript rows, turn numbers, failure text — one definition instead of a copy per caller. Transport-level error formatting stays with the transport. |
 | [`lib/dsh-tools-bridge.js`](lib/dsh-tools-bridge.js) | The same table exposed *into* DSH: the three-tool front door or the full registry installed in the injected tools scope, plus tools opened lazily in the calling agent's own scope. |
 | [`lib/clients.js`](lib/clients.js) | Caller identity and session ownership: header/`clientInfo`/User-Agent, a 0600 registry, and the owner a session is recorded against. |
-| [`lib/config-route.js`](lib/config-route.js) + [`lib/client.js`](lib/client.js) | Control plane: a loopback JSON route and the Plugins-page panel that reads and writes it. |
+| [`lib/config-route.js`](lib/config-route.js) + [`lib/client.js`](lib/client.js) | Control plane: a loopback JSON route and the browser panel that reads and writes it — registered both as a first-level Settings section and as the bundle row's Configure page. |
+| [`lib/transcript.js`](lib/transcript.js) | Windowed transcript reads: tail/head/outline, role and sequence filters, per-message caps and the response budget. |
 | [`work-sync.js`](work-sync.js) | The **second bundle row**: mounts task-start progress sync, publishes it as the `workSync` service, and owns its own config. |
 | [`lib/work-sync.js`](lib/work-sync.js) | The sync engine itself: who to ask, claim correlation, deadlines — built only on `session/event`. |
 | [`lib/workspace-grouping.js`](lib/workspace-grouping.js) | Put a session this endpoint starts into the sidebar project its directory already has. |
@@ -376,8 +377,9 @@ message, no state.
 
 ## The plugin's own settings page
 
-The bundle's page on the Web **Plugins** page (row **Configure**) carries every switch this plugin has, so
-none of them needs a YAML edit:
+The same panel is available in two places: as a **first-level section in the Settings dialog** (nav label
+`DSH MCP Server`, no Plugins-page drill-down), and as the bundle row's **Configure** page on the Web
+**Plugins** page. It carries every switch this plugin has, so none of them needs a YAML edit:
 
 | Control | Writes |
 |---|---|
@@ -614,10 +616,11 @@ What a calling model sees, and why it was shaped that way:
 node test/mcp-self-test.mjs            # 11 transport checks, no Harness needed
 node test/contracts-test.mjs           # 6 checks: the Harness wire shapes, pinned in one place
 node test/authority-test.mjs           # 5 checks: the sandbox ladder, containment, and the cwd clamp
+node test/transcript-test.mjs          # 7 checks: transcript windows, cursors, caps and the response budget
 node test/work-sync-test.mjs           # 18 checks: the progress-sync engine against a fake Harness
 node test/work-sync-plugin-test.mjs    # 5 checks: the sync bundle row's service, messages, switch, disposal
 node test/turn-wait-test.mjs          # 2 checks: which turn a queued or steered prompt reports
-node test/client-half-test.mjs         # 16 checks: the browser half's row page, its settings, its route
+node test/client-half-test.mjs         # 18 checks: the browser half's row page, its Settings section, its route
 node test/plugin-integration-test.mjs  # 121 checks: apply(), endpoint file + advertised URL, tools,
                                        # transcript windows, outline/paging/truncation, search, index
                                        # cursors, pending user decisions (PTC included), parked approvals
