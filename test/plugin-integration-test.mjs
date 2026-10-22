@@ -610,7 +610,7 @@ try {
 
   const status = await call('dsh_status', {})
   assert.equal(status.defaultModel.model, 'deepseek-v4.1-flash-anthropic')
-  assert.equal(status.toolNames.length, 18)
+  assert.equal(status.toolNames.length, 21)
   assert.equal(status.defaultPermissionPreset, 'workspace-write')
   assert.deepEqual(status.permissionPresets.map((option) => option.value), ['read-only', 'workspace-write', 'danger-full-access'])
   checks.push('dsh_status reports the default model, tool names, and permission presets')
@@ -1256,11 +1256,11 @@ try {
   // --- the DSH-facing tool surface ---------------------------------------------
   const listed = await rpc({ jsonrpc: '2.0', id: ++id, method: 'tools/list', params: {} })
   const mcpNames = listed.result.tools.map((tool) => tool.name).sort()
-  assert.equal(mcpNames.length, 18, 'the MCP endpoint publishes eighteen tools')
+  assert.equal(mcpNames.length, 21, 'the MCP endpoint publishes twenty-one tools')
   assert.ok(mcpNames.includes('dsh_open_session'), 'the GUI jump is part of the published table')
 
   // The default surface is the front door: three small schemas instead of
-  // seventeen, so a session pays for the catalogue only when it needs it.
+  // twenty, so a session pays for the catalogue only when it needs it.
   assert.deepEqual(
     registeredTools().map((tool) => tool.name).sort(),
     ['dsh_mcp_call', 'dsh_mcp_open', 'dsh_mcp_tools'],
@@ -1273,7 +1273,7 @@ try {
   const localStatus = await call('dsh_status', {})
   assert.equal(localStatus.dshTools.enabled, true)
   assert.equal(localStatus.dshTools.mode, 'lazy')
-  assert.equal(localStatus.dshTools.published, 18, 'every published tool stays openable')
+  assert.equal(localStatus.dshTools.published, 21, 'every published tool stays openable')
   assert.deepEqual(localStatus.dshTools.registered.slice().sort(), ['dsh_mcp_call', 'dsh_mcp_open', 'dsh_mcp_tools'])
   assert.equal(localStatus.clientPage.available, true)
   assert.equal(localStatus.clientPage.inGraph, true)
@@ -1296,12 +1296,12 @@ try {
   }
 
   const catalogue = await metaCall('dsh_mcp_tools', {})
-  assert.equal(catalogue.total, 18)
-  assert.equal(catalogue.count, 18)
+  assert.equal(catalogue.total, 21)
+  assert.equal(catalogue.count, 21)
   assert.equal(catalogue.tools.every((row) => row.native === false), true, 'nothing is native until it is opened')
   assert.ok(catalogue.tools.every((row) => row.purpose.length > 0 && row.purpose.length < 200), 'a catalogue row stays one line')
   const searched = await metaCall('dsh_mcp_tools', { query: 'transcript' })
-  assert.ok(searched.count > 0 && searched.count < 18, 'a query narrows the catalogue')
+  assert.ok(searched.count > 0 && searched.count < 21, 'a query narrows the catalogue')
   const one = await metaCall('dsh_mcp_tools', { name: 'dsh_read_session' })
   assert.equal(one.name, 'dsh_read_session')
   assert.ok(one.parameters.properties.mode, 'a single lookup returns the parameter schema')
@@ -1324,7 +1324,7 @@ try {
     .reduce((total, tool) => total + tool.description.length + JSON.stringify(tool.inputSchema).length, 0)
   assert.ok(frontDoorIndexCost < 3500, 'the index keeps the front door under 3.5 KB')
   assert.ok(frontDoorIndexCost * 4 < fullTableCost, 'the front door stays a fraction of the full table')
-  checks.push(`the front door names all eighteen tools with their signatures (${frontDoorIndexCost} chars vs ${fullTableCost} for the table)`)
+  checks.push(`the front door names all twenty-one tools with their signatures (${frontDoorIndexCost} chars vs ${fullTableCost} for the table)`)
 
   const bareName = await dispatch('whoami', {})
   assert.ok(bareName && typeof bareName === 'object', 'a bare name resolves to the published tool')
@@ -1351,7 +1351,7 @@ try {
   const openParam = registeredTools().find((tool) => tool.name === 'dsh_mcp_open').parameters.properties.tools.description
   assert.match(openParam, /bare name/, 'the parameter text matches the refusal, not the old "omit opens everything" promise')
   const wholeSet = await metaCall('dsh_mcp_open', { all: true }, makeAgent())
-  assert.equal(wholeSet.native.length, 18, 'all: true is still the way to the whole table')
+  assert.equal(wholeSet.native.length, 21, 'all: true is still the way to the whole table')
   checks.push('the front-door refusal is reachable, and opening always needs an explicit target')
 
   // Opening is per agent: the registrations land in the calling agent's own
@@ -1511,6 +1511,42 @@ try {
   assert.equal(injectedMessages().at(-1).message.content[0].text !== 'from an MCP client', true, 'an external caller keeps the controller path')
   checks.push('an external MCP caller keeps the unlabelled controller path')
 
+  // --- a must-reply question held open across a turn ---------------------------
+  const asksBefore = injectedMessages().length
+  const asking = call('dsh_ask_session', { sessionId: currentId(), question: 'WHICH FILE SHOULD THE EDIT TOUCH?' })
+  let questionRow
+  for (let attempt = 0; attempt < 200 && !questionRow; attempt += 1) {
+    questionRow = injectedMessages().slice(asksBefore).find((row) => /#q-/.test(row.message.content[0].text))
+    if (!questionRow) await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+  assert.ok(questionRow, 'the question reaches the target as an internal message')
+  const questionText = questionRow.message.content[0].text
+  const questionId = /#(q-[\w-]+)/.exec(questionText)[1]
+  assert.match(questionText, /WHICH FILE SHOULD THE EDIT TOUCH\?/, 'the first message carries the question')
+  assert.match(questionText, /dsh_answer_question/, 'and tells the target how to answer')
+  const lookedUp = await dispatch('dsh_get_question', { id: questionId }, makeAgent('agent-target', currentId()))
+  assert.equal(lookedUp.state, 'pending')
+  assert.equal(lookedUp.question, 'WHICH FILE SHOULD THE EDIT TOUCH?')
+  assert.equal(lookedUp.sessionId, currentId())
+  const answerPayload = await dispatch('dsh_answer_question', { id: questionId, answer: 'lib/x.js' }, makeAgent('agent-target', currentId()))
+  assert.equal(answerPayload.status, 'answered')
+  const askResult = await asking
+  assert.equal(askResult.status, 'answered')
+  assert.equal(askResult.id, questionId)
+  assert.equal(askResult.answer, 'lib/x.js')
+  assert.equal(askResult.sessionId, currentId())
+  const externalAnswer = await rpc({
+    jsonrpc: '2.0',
+    id: ++id,
+    method: 'tools/call',
+    params: { name: 'dsh_answer_question', arguments: { id: questionId, answer: 'not mine' } },
+  })
+  assert.ok(externalAnswer.result?.isError, 'an external caller has no session to answer as')
+  assert.match(externalAnswer.result.content[0].text, /Only the addressed DSH session/)
+  const afterAskStatus = await call('dsh_status', {})
+  assert.equal(afterAskStatus.questions.pending, 0, 'an answered question leaves nothing pending')
+  checks.push('a must-reply question blocks until the addressed session answers by id')
+
   const statusWithPolicy = await call('dsh_status', {})
   assert.equal(statusWithPolicy.busyMode.configured, 'setting')
   assert.equal(statusWithPolicy.busyMode.effective, 'steer', 'the deployment setting is read live')
@@ -1522,7 +1558,7 @@ try {
   assert.equal(configRead.exposeToDsh, true)
   assert.equal(configRead.exposeToDshMode, 'lazy')
   assert.deepEqual([...configRead.registered].sort(), ['dsh_mcp_call', 'dsh_mcp_open', 'dsh_mcp_tools'])
-  assert.equal(configRead.published.length, 18)
+  assert.equal(configRead.published.length, 21)
   assert.equal(configRead.configPath, '/mcp-config')
   assert.equal(configRead.clientPage.inGraph, true)
   assert.equal(configRead.busyMode, 'setting')
@@ -1693,7 +1729,7 @@ try {
   // The full surface is the opt-in: the whole table, projected for the registry.
   const fullTools = []
   apply(collectorContext(fullTools), { token: 'full-token', endpointFile: join(dir, 'full-endpoint.json'), url: 'http://127.0.0.1:9', dshHome: dir, exposeToDshMode: 'full' })
-  assert.equal(fullTools.length, 18, 'full mode registers the whole table')
+  assert.equal(fullTools.length, 21, 'full mode registers the whole table')
   assert.deepEqual(fullTools.map((tool) => tool.name).sort(), mcpNames)
   const runPromptTool = fullTools.find((tool) => tool.name === 'dsh_run_prompt')
   assert.equal(runPromptTool.parameters.properties.prompt.minLength, undefined, 'unsupported keywords must be dropped')

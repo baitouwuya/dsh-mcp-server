@@ -21,13 +21,15 @@ import { createDshCapabilities, DEFAULT_MAX_CONCURRENT_TURNS, DEFAULT_TURN_TIMEO
 import { createClientRegistry, DEFAULT_CLIENT_FLUSH_MS, resolveCaller } from './lib/clients.js'
 import { createConfigHandler } from './lib/config-route.js'
 import { createMcpHttpHandler } from './lib/http-route.js'
+import { createInternalDelivery, MCP_MESSAGE_KIND } from './lib/dsh-delivery.js'
+import { createQuestionBroker } from './lib/questions.js'
 import { McpGateway, SERVER_NAME } from './lib/protocol.js'
 import { registerDshTools } from './lib/dsh-tools-bridge.js'
 import { groupOwnedSessions } from './lib/workspace-grouping.js'
 import { errorText } from './lib/dsh-contracts.js'
 
 /** Keep in sync with package.json; reported through `initialize`. */
-const VERSION = '0.19.0'
+const VERSION = '0.20.0'
 
 /** This package's own name, as the profile's bundle row spells it. */
 const PACKAGE_NAME = (() => {
@@ -283,6 +285,29 @@ export function apply(ctx, config = {}) {
   })
 
   /**
+   * Must-reply questions, held open across the asking turn.
+   *
+   * Delivery is the same internal path every other cross-session message uses;
+   * the running check only suppresses reminders while the target already has a
+   * turn, so a slow answer does not queue a pile of them.
+   */
+  const questionDelivery = createInternalDelivery({ ctx, logger: log, kind: MCP_MESSAGE_KIND })
+  const questions = createQuestionBroker({
+    logger: log,
+    deliver: (sessionId, text, meta) => questionDelivery.deliver(sessionId, text, meta),
+    isRunning: (sessionId) => {
+      try {
+        return ctx.get('agents')?.get?.(sessionId)?.status === 'running'
+      } catch {
+        return false
+      }
+    },
+    // Without the local tool surface the target could not answer at all, so a
+    // must-reply question would only hang; refusing is the honest answer.
+    canAnswer: () => exposeToDsh && dshToolsState.names.length > 0,
+  })
+
+  /**
    * The work-sync row's service, when that bundle is installed and loaded.
    *
    * Absent is a normal state: a profile may run this endpoint without the
@@ -339,6 +364,7 @@ export function apply(ctx, config = {}) {
     busyMode,
     openSession: queueOpenSession,
     syncStatus: () => workSyncStatus(),
+    questions,
   })
 
   dshToolsState.published = capabilities.tools.map((tool) => tool.name)
@@ -771,6 +797,7 @@ export function apply(ctx, config = {}) {
     } catch (error) {
       log('debug', 'configuration route disposal failed', { error: error instanceof Error ? error.message : String(error) })
     }
+    questions.dispose()
     removeOwnEndpointFile()
     clients.flush()
     log('info', 'dsh-mcp-server stopped')

@@ -39,6 +39,7 @@ ships imports a DSH package, so every layer talks through `ctx` and plain data.
 | [`lib/transcript.js`](lib/transcript.js) | Windowed transcript reads: tail/head/outline, role and sequence filters, per-message caps and the response budget. |
 | [`work-sync.js`](work-sync.js) | The **second bundle row**: mounts task-start progress sync, publishes it as the `workSync` service, and owns its own config. |
 | [`lib/work-sync.js`](lib/work-sync.js) | The sync engine itself: who to ask, claim correlation, deadlines — built only on `session/event`. |
+| [`lib/questions.js`](lib/questions.js) | Must-reply questions: the id, the blocking wait, interval reminders that name only the id, the answer, and deadlock/abort handling — delivery and the clock are injected. |
 | [`lib/workspace-grouping.js`](lib/workspace-grouping.js) | Put a session this endpoint starts into the sidebar project its directory already has. |
 
 Three rules keep the layering honest. **Services, not re-implementations**: transcript reads replay the durable
@@ -53,6 +54,9 @@ disk**: everything this plugin persists is its own state (`$DSH_HOME/mcp/*.json`
 |---|---|
 | `dsh_run_prompt` | Start a **new** DSH session and run one prompt; returns the assistant's final text and the new `sessionId`. Supports `cwd`, `agentPreset`, `permissionPreset`, `model` (`provider/model`), `wait: false`, `timeoutMs`. |
 | `dsh_continue_session` | Send a prompt to an **existing** session (resuming it if it is cold). Keeps the session's context and workspace; `permissionPreset` re-pins the session's sandbox mode and approval policy before the prompt, and `model` (`provider/model`) overrides the session's model. Without `model` the session keeps the model it already runs. |
+| `dsh_ask_session` | Ask one session a question it **must answer**, and wait for the answer. The question gets an id (`q-…`), the target is reminded about that id until it answers, and the call does not return first — the asking turn cannot end without one. Only the addressed session may answer; `remindMs` sets the reminder interval and `timeoutMs` (default 0) sets an optional deadline. |
+| `dsh_answer_question` | Answer a must-reply question by id, from the addressed session. The waiting `dsh_ask_session` call returns this text and the asking turn continues. |
+| `dsh_get_question` | Read a must-reply question by id: its text, who asked, when, how many reminders were sent, and the answer once it exists. Reminders carry only the id; this is how the target reads the question again. |
 | `dsh_list_commands` | The slash commands a session's agent can currently run: the global command layer plus whatever that agent's preset composes, so availability differs per agent preset. |
 | `dsh_run_command` | Run one slash command in a session and return its settled `{ kind, text, commandId }`. `line` takes a complete command line (`"/compact"`, `"/permission danger-full-access"`); `command` (+ optional `args`) takes a bare name. The command executes immediately without a model turn. |
 | `dsh_list_sessions` | A page of the session index: `sessionId`, title, running state, archival state, activity time, and the recorded owning agent (`view: "full"` adds cwd and liveness). Narrow server-side with `query` (title/cwd/owner/id), `mine: true` (or the `restrictToOwner` setting), `owner: "<id>"` (narrowing only: on a restricted endpoint another owner is refused), and `running`; page with `cursor`/`nextCursor`. Archived sessions are hidden unless `includeArchived: true`, mirroring the Web UI. |
@@ -68,7 +72,7 @@ disk**: everything this plugin persists is its own state (`$DSH_HOME/mcp/*.json`
 | `dsh_list_permission_presets` | The deployment's permission presets (each bundles a sandbox mode with an approval policy) plus the default for new sessions, for the `permissionPreset` argument above. |
 | `dsh_list_tools` | The tools DSH exposes to its own agents, for choosing what a delegated prompt can do; `query` narrows by name or description and `limit` caps the list. |
 | `dsh_open_session` | Ask the running Web GUI to open one session and select it in the sidebar — for pointing the person at a session this endpoint started. Queued for the page that is open and consumed once; the session itself is untouched. |
-| `dsh_status` | Endpoint, profile, version, session/live-agent counts, default model, active turns, the default permission preset, the delivery policy, and the local tool surface (`dshTools`). |
+| `dsh_status` | Endpoint, profile, version, session/live-agent counts, default model, active turns, the default permission preset, the delivery policy, the local tool surface (`dshTools`), and the must-reply questions held open (`questions`). |
 
 Archival needs the Host's `workspaceRegistry` service (`@deepseek-ai/dsh-workspace`). Without it the
 two archive tools report that the service is unavailable and listings simply omit the `archived`
@@ -186,16 +190,16 @@ client config. On by default; set `exposeToDsh: false` to keep the plugin MCP-on
 
 ### On demand, not all at once
 
-Eighteen tool schemas are ~17.2 KB (~4.3k tokens) of permanent prompt cost in **every** session, whether
+Twenty-one tool schemas are ~19.2 KB (~4.8k tokens) of permanent prompt cost in **every** session, whether
 that session ever delegates anything or not. So the default surface is a three-tool front door:
 
 | Front-door tool | Purpose |
 |---|---|
 | `dsh_mcp_tools` | The catalogue — every published name **with its call signature** — plus one line per tool and `native` when it is already callable. `name` returns that tool's parameter schema, projected for the DSH registry. |
-| `dsh_mcp_open` | Register the named tools (**or `all: true`) into *this* session**, so they are callable natively from the next step on. The target is always explicit: an empty or missing list is refused rather than quietly opening all eighteen. |
+| `dsh_mcp_open` | Register the named tools (**or `all: true`) into *this* session**, so they are callable natively from the next step on. The target is always explicit: an empty or missing list is refused rather than quietly opening all twenty-one. |
 | `dsh_mcp_call` | Call one published tool directly, without opening it — for a single call that does not deserve a permanent schema. |
 
-That is ~3.0 KB (~750 tokens) at rest instead of ~17.2 KB, and the rest of the table is paid for only by
+That is ~3.1 KB (~770 tokens) at rest instead of ~19.2 KB, and the rest of the table is paid for only by
 sessions that actually use it. `dsh_status` reports the whole shape:
 `dshTools: { enabled, mode, registered, published, via }`.
 
@@ -206,9 +210,9 @@ before it can call anything, and pays that step again in every new session. So t
 catalogue itself — every published name with its required arguments, inside `dsh_mcp_tools`'s own
 description:
 
-> Publishes 18: dsh_run_prompt(prompt), dsh_continue_session(sessionId, prompt), dsh_list_commands(sessionId), …
+> Publishes 21: dsh_run_prompt(prompt), dsh_continue_session(sessionId, prompt), dsh_ask_session(sessionId, question), …
 
-That index is ~600 characters (~150 tokens) and turns "send this to session X" into a single call:
+That index is ~1.0 KB (~250 tokens) and turns "send this to session X" into a single call:
 `dsh_mcp_call({ tool: "dsh_continue_session", arguments: { sessionId, prompt } })`. Names are forgiving:
 a bare `continue_session` resolves, a near miss is refused with the close matches named, `arguments`
 accepts a JSON object string, and a refused call ends by naming the `dsh_mcp_tools({ name })` lookup that
@@ -320,6 +324,35 @@ The Harness validates a tool's canonical value, and an internal (PTC) call has n
 hide a nested `undefined`: one unset field anywhere in a payload fails the whole call with
 `value is not lossless JSON`. The DSH-facing surface projects every result through
 `JSON.parse(JSON.stringify(...))` before returning it, so an unset field can only ever disappear.
+
+## Must-reply questions
+
+A one-way prompt is not a question when the caller cannot continue without the answer. `dsh_ask_session`
+turns one session's question into a request that stays open:
+
+- **One id per question.** The question is delivered once, in full, and gets an id (`q-…`). The call
+  blocks: the asking turn cannot end before the target answers, so the answer always reaches the work
+  that needs it.
+- **Reminders name the id, not the question.** While the request is open the target is reminded every
+  `remindMs` (default 60 s, minimum 5 s) — but never while it is already running a turn, so reminders
+  cannot pile up behind a long answer. The reminder carries the id and the two calls, not the question
+  again; `dsh_get_question` is how the target reads it again.
+- **Only the addressed session can answer.** `dsh_answer_question` checks the caller's session id
+  against the request's target, so another session (or an external MCP client, which has no session)
+  cannot settle it. The first answer stands; repeating it reports `alreadyAnswered`.
+- **The wait can be ended deliberately, never silently.** `timeoutMs: 0` (the default) waits until
+  answered; a positive value returns `status: "timedOut"`. A cancelled asking turn, a closed HTTP
+  request, or a plugin reload rejects the call, and the target receives one "withdrawn" line so it
+  stops working on a question nobody is waiting for; a target that cannot be reached for five
+  consecutive reminders fails the wait instead of holding it forever.
+- **Self-asks and deadlocks are refused before delivery.** Asking yourself is pointless; asking a
+  session that is already (directly or transitively) waiting on a must-reply question from you would
+  deadlock both turns, so it is refused with the chain named.
+- **It needs an answer path.** The target answers through this endpoint's DSH-local tools, so the
+  request is refused while `exposeToDsh` is off (a question nobody can answer would only hang).
+  An external MCP caller may ask too, but only the addressed DSH session can answer.
+
+`dsh_status` reports `questions: { pending, settled }`.
 
 ## Task-start progress sync
 
@@ -464,7 +497,7 @@ The bundle row in `cordis.patch.yml` accepts (all optional):
 | `clientsFile` | `$DSH_HOME/mcp/dsh-mcp-clients.json` | Where the caller registry (agents seen + session owners) is kept, mode 0600. |
 | `clientsFlushMs` | `5000` | How long registry writes are coalesced before they hit disk. |
 | `exposeToDsh` | `true` | Expose the MCP tools to DSH itself. `false` keeps the endpoint MCP-only. |
-| `exposeToDshMode` | `lazy` | `lazy` registers the three-tool front door, whose `dsh_mcp_tools` description already carries every published name and its required arguments (the result rows are name/purpose/native only), and lets a session open what it needs; `full` registers all eighteen at load (permanent schema cost). An unknown value fails at load. |
+| `exposeToDshMode` | `lazy` | `lazy` registers the three-tool front door, whose `dsh_mcp_tools` description already carries every published name and its required arguments (the result rows are name/purpose/native only), and lets a session open what it needs; `full` registers all twenty-one at load (permanent schema cost). An unknown value fails at load. |
 | `exposeToDshPage` | `true` | Serve the loopback configuration route the Web Plugins page's switch reads and writes. |
 | `configPath` | `<path>-config` | Route path of that configuration endpoint (`/mcp-config` by default). |
 | `entryId` | `dsh-mcp-server` | Profile row the configuration page addresses when it saves the switch. |
@@ -614,7 +647,7 @@ What a calling model sees, and why it was shaped that way:
   `stopActivity: true`", "raise this session's preset in the Harness GUI") instead of leaking a stack.
 - **The surface is load-aware.** `exposeToDshMode: lazy` gives a DSH session three tools, and the `dsh_mcp_tools`
   description already carries every published name and its required arguments (the result rows are name, purpose
-  and `native`); `full` puts all eighteen in the prompt.
+  and `native`); `full` puts all twenty-one in the prompt.
 - **Status is one call.** `dsh_status` answers "what am I talking to" — endpoint, plugin version, live model
   selection, delivery policy, sync state, tool-table shape — without probing.
 
@@ -625,11 +658,12 @@ node test/mcp-self-test.mjs            # 11 transport checks, no Harness needed
 node test/contracts-test.mjs           # 6 checks: the Harness wire shapes, pinned in one place
 node test/authority-test.mjs           # 5 checks: the sandbox ladder, containment, and the cwd clamp
 node test/transcript-test.mjs          # 7 checks: transcript windows, cursors, caps and the response budget
+node test/questions-test.mjs           # 12 checks: must-reply ids, reminders (id only), answers, deadlines, aborts, deadlocks
 node test/work-sync-test.mjs           # 18 checks: the progress-sync engine against a fake Harness
 node test/work-sync-plugin-test.mjs    # 5 checks: the sync bundle row's service, messages, switch, disposal
 node test/turn-wait-test.mjs          # 2 checks: which turn a queued or steered prompt reports
 node test/client-half-test.mjs         # 18 checks: the browser half's bundle page, its row page, its route
-node test/plugin-integration-test.mjs  # 121 checks: apply(), endpoint file + advertised URL, tools,
+node test/plugin-integration-test.mjs  # 122 checks: apply(), endpoint file + advertised URL, tools,
                                        # transcript windows, outline/paging/truncation, search, index
                                        # cursors, pending user decisions (PTC included), parked approvals
                                        # and questions answered over MCP, waiting, caller identity +
@@ -641,14 +675,14 @@ node test/plugin-integration-test.mjs  # 121 checks: apply(), endpoint file + ad
                                        # configuration route's origin/content-type/413 fences, live default
                                        # model resolution, ownership persistence, and that sync is a separate row
 node test/stdio-bridge-test.mjs        # 4 checks, needs a RUNNING Harness (one real delegated turn)
-node test/live-e2e-test.mjs            # 46 checks over HTTP: protocol, resources, all eighteen tools,
+node test/live-e2e-test.mjs            # 46 checks over HTTP: protocol, resources, all twenty-one tools,
                                        # archive/unarchive, permission presets, commands, error paths,
                                        # 4 real turns (needs a Harness)
 ```
 
 The bridge's schema projection was verified against the Harness's **own** JSON-Schema validator
-(extracted from the app bundle): 12 of the 18 raw MCP schemas use `minLength`, a keyword that validator
-rejects outright, and all 18 projected schemas — plus canonical values of every shape — are accepted.
+(extracted from the app bundle): 15 of the 21 raw MCP schemas use `minLength`, a keyword that validator
+rejects outright, and all 21 projected schemas — plus canonical values of every shape — are accepted.
 
 Live checks used during development also covered: a real MCP client exchange against the running
 Harness, an end-to-end `dsh_run_prompt` → `dsh_continue_session` → `dsh_read_session` flow, permission
