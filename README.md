@@ -393,9 +393,12 @@ reaches the same switches. It carries every switch this plugin has, so none of t
 Each control saves through the profile configuration editor and reloads this plugin's row, exactly as a
 hand edit would. The panel mirrors the Harness's own settings section: a bold section title with a short summary
 (version, published and registered counts), then one row per setting — a 14px title over a 12px description on
-the left, the control on the right, and a `.5px` hairline between rows. Every colour, separator and radius comes
-from DSH's `--dsw-*` theme tokens (with neutral fallbacks), so it follows light/dark and the accent instead of
-shipping a palette of its own.
+the left, the control on the right, and a `.5px` hairline between rows.
+
+The controls are the Harness's own UI primitives, not re-implementations: `Switch`, `SegmentedControl`,
+`Pill` and `Button` come from `@deepseek-ai/dsh-client-ui-primitives`, which the client module loader exposes
+as a platform seed. The toggles are therefore DSH's capsule switches at DSH's size, and the segmented choices are
+DSH's segmented control; they track the theme by construction.
 
 The route is loopback-only **and** browser-hardened: a request carrying a foreign `Origin`/`Sec-Fetch-Site`
 is refused through DSH's own connection fence, the body must be `application/json`, unknown fields are

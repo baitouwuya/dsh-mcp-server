@@ -27,21 +27,28 @@ checks.push('the client half registers under this package name')
 
 /** A React just real enough to build elements and hold hook state. */
 const React = {
-  createElement: (type, props, ...children) => ({ type, props: props ?? {}, children }),
+  createElement: (type, props, ...children) => ({ type, props: { ...(props ?? {}), ...(children.length ? { children } : {}) }, children }),
   useState: (value) => [value, () => {}],
   useEffect: () => {},
   useCallback: (callback) => callback,
 }
 
-let required
+/** The Harness primitives, as plain host elements so the tree can be walked. */
+const uiMock = {
+  Switch: (props) => ({ type: 'button', props: { role: 'switch', 'aria-checked': props.checked ? 'true' : 'false', 'aria-label': props.label, disabled: props.disabled }, children: [] }),
+  SegmentedControl: (props) => ({ type: 'div', props: { role: 'tablist', 'aria-label': props.label }, children: (props.options || []).map((option) => ({ type: 'button', props: { 'aria-pressed': option.value === props.value ? 'true' : 'false', disabled: props.disabled }, children: [option.label] })) }),
+  Pill: (props) => ({ type: props.onClick ? 'button' : 'span', props: { 'aria-pressed': props.active ? 'true' : 'false', disabled: props.disabled }, children: [props.children] }),
+  Button: (props) => ({ type: 'button', props: { onClick: props.onClick }, children: [props.children] }),
+}
+const required = []
 const exported = spec.factory((name) => {
-  required = name
-  return React
+  required.push(name)
+  return name === 'react' ? React : uiMock
 })
-assert.equal(required, 'react', 'the client half asks only for React')
+assert.deepEqual(required, ['react', '@deepseek-ai/dsh-client-ui-primitives'], 'the client half requires React and the Harness primitives')
 assert.deepEqual(exported.inject, ['slots', 'locale'])
 assert.equal(typeof exported.apply, 'function')
-checks.push('the client half requires only the baseline React module')
+checks.push('the client half requires React and the Harness UI primitives, nothing else')
 
 // --- the row configuration page ----------------------------------------------
 const registrations = []
@@ -89,7 +96,7 @@ const renderingReact = {
   useEffect: () => {},
   useCallback: (callback) => callback,
 }
-const panelHost = spec.factory(() => renderingReact)
+const panelHost = spec.factory((name) => (name === 'react' ? renderingReact : uiMock))
 const panelParts = (() => {
   const registered = new Map()
   const slots = { inject: (_name, callback) => { callback(); return () => {} }, register: (options, component) => { registered.set(options.name, component); return () => {} } }
@@ -103,7 +110,15 @@ const collectText = (node) => {
   if (Array.isArray(node)) return node.flatMap(collectText)
   return collectText(node.children)
 }
-const labels = collectText(panelPage({ view: 'page' }).type(panelPage({ view: 'page' }).props))
+// React.createElement does not invoke components, so walk the tree by calling
+// every component it meets — that is what puts the primitives' host elements in.
+const renderAll = (node) => {
+  if (node === null || node === undefined || typeof node !== 'object') return node
+  if (Array.isArray(node)) return node.map(renderAll)
+  if (typeof node.type === 'function') return renderAll(node.type(node.props))
+  return { ...node, children: (node.children ?? []).map(renderAll) }
+}
+const labels = collectText(renderAll(panelPage({ view: 'page' })))
 for (const expected of ['Surface', 'On demand', 'All at once', 'Sidebar projects', 'Join an existing project', 'May create projects', 'Delivery while busy', 'Follow the setting', 'Queue', 'Steer', 'Sync progress when a task starts']) {
   assert.ok(labels.includes(expected), `the settings page must offer "${expected}"`)
 }
@@ -111,7 +126,7 @@ checks.push('the settings page renders every control it offers')
 
 const bundleT = (key) => ({ bundleIntro: 'intro-copy' }[key] ?? key)
 const bundleElement = panelParts.get('plugins.bundle.config')({ t: bundleT })
-const bundleLabels = collectText(bundleElement.type(bundleElement.props))
+const bundleLabels = collectText(renderAll(bundleElement))
 assert.ok(bundleLabels.includes('intro-copy'), 'the bundle page explains what it configures')
 assert.ok(bundleLabels.includes('syncLabel'), 'and offers the same controls')
 assert.ok(bundleLabels.includes('sectionTitle'), 'including the surface row title')
@@ -126,7 +141,7 @@ const findButtons = (node, found = []) => {
   for (const child of node.children ?? []) findButtons(child, found)
   return found
 }
-const panelTree = panelPage({ view: 'page' }).type(panelPage({ view: 'page' }).props)
+const panelTree = renderAll(panelPage({ view: 'page' }))
 const switches = findButtons(panelTree).filter((button) => button.props.role === 'switch')
 assert.equal(switches.length, 2, 'the page offers the enable switch and the sync switch')
 assert.equal(Boolean(switches[0].props.disabled), false, 'the enable switch is operable')
