@@ -211,6 +211,10 @@ function makeServices() {
         injectedMessages.push({ sessionId, mode: 'steer', message })
         admit({ sessionId, requestId: 'agent-steer', content: message.content, mode: 'steer' })
       },
+      inject(message) {
+        // No wake-up and no turn: the message waits for the next admitted step.
+        injectedMessages.push({ sessionId, mode: 'inject', message })
+      },
     }
   }
 
@@ -454,6 +458,9 @@ function makeServices() {
       configEditor,
       clientModules,
       tools,
+      // The live-Agent registry: injection needs a live handle and must never
+      // resume a cold one, so the fake hands one back for any id.
+      agents: { get: (sessionId) => agentHandle(sessionId) },
       agentDefaultModel: { currentSelection: () => ({ ...defaultSelection }) },
       setDefaultSelection: (selection) => { defaultSelection = selection },
       setSelectModelFailure: (value) => { selectModelFailure = value === true },
@@ -1524,6 +1531,18 @@ try {
   const questionId = /#(q-[\w-]+)/.exec(questionText)[1]
   assert.match(questionText, /WHICH FILE SHOULD THE EDIT TOUCH\?/, 'the first message carries the question')
   assert.match(questionText, /dsh_answer_question/, 'and tells the target how to answer')
+  // A reminder is injected into a call the target already makes; it never opens
+  // a turn of its own and it does not repeat the question.
+  const injectedBefore = injectedMessages().length
+  const fireSessionEvent = (event) => ctx.hooks.get('session/event')({ id: currentId(), header: { id: currentId() } }, event)
+  fireSessionEvent({ type: 'turn/start', data: { turn: 1 } })
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  const reminderRow = injectedMessages().slice(injectedBefore).find((row) => row.mode === 'inject')
+  assert.ok(reminderRow, 'a reminder rides the next model call')
+  assert.match(reminderRow.message.content[0].text, new RegExp('#' + questionId), 'the reminder names the id')
+  assert.equal(reminderRow.message.content[0].text.includes('WHICH FILE SHOULD THE EDIT TOUCH?'), false, 'and not the question')
+  const lookedUpAgain = await dispatch('dsh_get_question', { id: questionId }, makeAgent('agent-target', currentId()))
+  assert.equal(lookedUpAgain.reminders >= 1, true, 'the injection is counted on the question')
   const lookedUp = await dispatch('dsh_get_question', { id: questionId }, makeAgent('agent-target', currentId()))
   assert.equal(lookedUp.state, 'pending')
   assert.equal(lookedUp.question, 'WHICH FILE SHOULD THE EDIT TOUCH?')
@@ -1546,6 +1565,34 @@ try {
   const afterAskStatus = await call('dsh_status', {})
   assert.equal(afterAskStatus.questions.pending, 0, 'an answered question leaves nothing pending')
   checks.push('a must-reply question blocks until the addressed session answers by id')
+
+  // --- a human stop ends the question and is never fought ----------------------
+  const stopAsk = call('dsh_ask_session', { sessionId: currentId(), question: 'SHOULD THIS WAKE THE STOPPED SESSION?' })
+  let stopRow
+  for (let attempt = 0; attempt < 200 && !stopRow; attempt += 1) {
+    stopRow = injectedMessages().slice(asksBefore).find((row) => /SHOULD THIS WAKE/.test(row.message.content[0].text))
+    if (!stopRow) await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+  assert.ok(stopRow, 'the second question is delivered')
+  const stopId = /#(q-[\w-]+)/.exec(stopRow.message.content[0].text)[1]
+  const stopDelivered = injectedMessages().length
+  fireSessionEvent({ type: 'turn/end', data: { reason: { kind: 'aborted', reason: { kind: 'user' } } } })
+  const stoppedAsk = await stopAsk
+  assert.equal(stoppedAsk.status, 'stopped')
+  assert.equal(stoppedAsk.id, stopId)
+  assert.equal(injectedMessages().length, stopDelivered, 'a stop sends nothing to the stopped session')
+  const refusedStopped = await rpc({
+    jsonrpc: '2.0',
+    id: ++id,
+    method: 'tools/call',
+    params: { name: 'dsh_ask_session', arguments: { sessionId: currentId(), question: 'WAKE UP?' } },
+  })
+  assert.ok(refusedStopped.result?.isError, 'a stopped session is not woken by a new question')
+  assert.match(refusedStopped.result.content[0].text, /stopped by a human/)
+  assert.equal(injectedMessages().length, stopDelivered, 'the refused ask delivered nothing')
+  fireSessionEvent({ type: 'turn/start', data: { turn: 3 } })
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  checks.push('a human stop settles the question, and a stopped session is never woken')
 
   const statusWithPolicy = await call('dsh_status', {})
   assert.equal(statusWithPolicy.busyMode.configured, 'setting')
@@ -1759,7 +1806,10 @@ try {
   // --- task-start work sync is its own bundle row -------------------------------
   // This bundle no longer subscribes to session events: the dsh-work-sync row
   // mounts the engine and publishes a service, and this endpoint only reads it.
-  assert.equal(ctx.hooks.get('session/event'), undefined, 'the MCP row does not subscribe to session events')
+  // The endpoint's one session/event listener exists only for must-reply
+  // liveness: passive reminders and honoring a human stop. The sync engine is
+  // still the separate row's business.
+  assert.equal(typeof ctx.hooks.get('session/event'), 'function', 'the MCP row listens for question liveness')
   const statusWithoutSync = await call('dsh_status', {})
   assert.equal(statusWithoutSync.sync.present, false, 'without the sync row the status says so')
   assert.equal(statusWithoutSync.sync.enabled, false)
@@ -1770,7 +1820,7 @@ try {
   })
   assert.equal(syncWrite.status, 400, 'the sync switch is refused when the row that owns it is absent')
   assert.match(String((await syncWrite.json()).error), /dsh-work-sync/)
-  checks.push('task-start sync is a separate row: the MCP row neither subscribes nor saves its switch')
+  checks.push('task-start sync is a separate row: the MCP row mounts no sync engine and saves no sync switch')
 
   // An internal caller may start a session only inside its own workspace root:
   // the session's cwd is what DSH uses as its sandbox boundary.

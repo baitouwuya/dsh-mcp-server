@@ -2,9 +2,9 @@
  * The must-reply question broker, against a fake delivery path.
  *
  * What matters here is the protocol: an id per question, the question carried
- * once, reminders that name only the id, an answer that only the addressed
- * session may give, and a wait that outlives a target's turn — without leaving
- * timers or promises behind when the caller gives up.
+ * once, reminders that name only the id and ride the target's own model calls
+ * instead of waking it, an answer only the addressed session may give, and a
+ * wait that a person's stop or the caller's cancellation can end cleanly.
  */
 import assert from 'node:assert/strict'
 
@@ -12,43 +12,34 @@ import { createQuestionBroker } from '../lib/questions.js'
 
 const checks = []
 
-/** Poll until a predicate holds; the broker's timers are real. */
-async function waitFor(predicate, timeoutMs = 1500) {
-  const started = Date.now()
-  while (Date.now() - started < timeoutMs) {
-    if (predicate()) return true
-    await new Promise((resolve) => setTimeout(resolve, 5))
-  }
-  return predicate()
-}
-
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const idOf = (text) => /#(q-[\w-]+)/u.exec(String(text))?.[1]
 
-/** One broker whose delivery and running state the test can drive. */
+/** One broker whose delivery, stopped set and clock the test can drive. */
 function harness(options = {}) {
   const delivered = []
-  const running = new Set()
+  const stopped = new Set(options.stopped ?? [])
+  let clock = 1_000_000
   const broker = createQuestionBroker({
     deliver: async (target, text, meta) => {
       delivered.push({ target, text, meta })
       if (typeof options.deliver === 'function') return options.deliver(target, text, meta)
-      return { accepted: true, startsTurn: true }
+      return { accepted: true, startsTurn: meta?.inject !== true }
     },
-    isRunning: (sessionId) => running.has(sessionId),
+    isStopped: (sessionId) => stopped.has(sessionId),
     canAnswer: () => options.canAnswer !== false,
     logger: () => {},
-    minRemindMs: 15,
-    maxRemindMs: 1000,
+    now: () => clock,
+    activityDedupeMs: 1000,
   })
-  return { broker, delivered, running }
+  return { broker, delivered, stopped, advance: (ms) => { clock += ms } }
 }
 
 /** Start one ask and wait until its first message landed. */
-async function asking(h, { question = 'WHICH FILE?', remindMs = 1000, timeoutMs = 0, signal, from = { sessionId: 'asker' }, target = 'target' } = {}) {
-  const promise = h.broker.ask({ targetSessionId: target, question, from, remindMs, timeoutMs, signal })
-  const delivered = await waitFor(() => h.delivered.length >= 1)
-  assert.equal(delivered, true, 'the question is delivered')
+async function asking(h, { question = 'WHICH FILE?', timeoutMs = 0, signal, from = { sessionId: 'asker' }, target = 'target' } = {}) {
+  const promise = h.broker.ask({ targetSessionId: target, question, from, timeoutMs, signal })
+  await sleep(5)
+  assert.equal(h.delivered.length, 1, 'the question is delivered')
   return { promise, id: idOf(h.delivered[0].text) }
 }
 
@@ -59,10 +50,10 @@ async function asking(h, { question = 'WHICH FILE?', remindMs = 1000, timeoutMs 
   assert.ok(id, 'the question gets an id')
   assert.equal(h.delivered.length, 1, 'the question is delivered once')
   assert.equal(h.delivered[0].target, 'target')
+  assert.equal(h.delivered[0].meta.inject, undefined, 'the question itself is a normal delivery')
   assert.match(h.delivered[0].text, /WHICH FILE DOES THE FIX TOUCH\?/, 'the first message carries the question')
   assert.match(h.delivered[0].text, new RegExp('#' + id), 'and the id')
   assert.match(h.delivered[0].text, /dsh_answer_question/, 'and how to answer')
-  assert.match(h.delivered[0].text, /dsh_get_question/, 'and how to read it again')
   const snapshot = h.broker.get({ id })
   assert.equal(snapshot.state, 'pending')
   assert.equal(snapshot.question, 'WHICH FILE DOES THE FIX TOUCH?')
@@ -75,32 +66,104 @@ async function asking(h, { question = 'WHICH FILE?', remindMs = 1000, timeoutMs 
   checks.push('a question is delivered once with an id, and the answer settles it')
 }
 
-// --- reminders name the id, never the question -------------------------------
+// --- a reminder rides an activity event and names only the id ----------------
 {
   const h = harness()
-  const { promise, id } = await asking(h, { remindMs: 15, question: 'A SECRET QUESTION' })
-  assert.equal(await waitFor(() => h.delivered.length >= 2), true, 'a reminder is sent')
+  const { promise, id } = await asking(h, { question: 'A SECRET QUESTION' })
+  await sleep(30)
+  assert.equal(h.delivered.length, 1, 'no timer pushes a reminder by itself')
+  await h.broker.onActivity('target')
+  assert.equal(h.delivered.length, 2, 'an activity event injects a reminder')
   const reminder = h.delivered[1]
+  assert.equal(reminder.meta.inject, true, 'the reminder is injected, not turned into a turn')
   assert.match(reminder.text, new RegExp('#' + id), 'the reminder carries the id')
   assert.equal(reminder.text.includes('A SECRET QUESTION'), false, 'the reminder does not repeat the question')
   assert.match(reminder.text, /dsh_get_question/, 'the reminder says how to read it')
+  assert.equal(h.broker.get({ id }).reminders, 1, 'the injection is counted')
   h.broker.answer({ id, answer: 'answered', from: { sessionId: 'target' } })
   await promise
-  checks.push('reminders carry the id and do not repeat the question')
+  checks.push('reminders are injected on activity and carry only the id')
 }
 
-// --- a running target is not reminded, so reminders cannot pile up -----------
+// --- a turn start and its first step produce one reminder -------------------
 {
   const h = harness()
-  h.running.add('target')
-  const { promise, id } = await asking(h, { remindMs: 15 })
-  await sleep(80)
-  assert.equal(h.delivered.length, 1, 'no reminder while the target already runs a turn')
-  h.running.delete('target')
-  assert.equal(await waitFor(() => h.delivered.length >= 2), true, 'the reminder resumes once it is idle')
+  const { promise, id } = await asking(h)
+  await h.broker.onActivity('target')
+  await h.broker.onActivity('target')
+  assert.equal(h.delivered.length, 2, 'two events in one call window inject once')
+  h.advance(1001)
+  await h.broker.onActivity('target')
+  assert.equal(h.delivered.length, 3, 'a later call gets its own reminder')
+  assert.equal(h.broker.get({ id }).reminders, 2)
   h.broker.answer({ id, answer: 'done', from: { sessionId: 'target' } })
   await promise
-  checks.push('a running target is not reminded, and reminders resume when it is idle')
+  checks.push('turn-start and step-start share one reminder, later steps get another')
+}
+
+// --- a reminder waits until the question itself has landed ------------------
+{
+  let release
+  const gate = new Promise((resolve) => { release = resolve })
+  let calls = 0
+  const h = harness({
+    deliver: async () => { calls += 1; if (calls === 1) await gate; return { accepted: true } },
+  })
+  const promise = h.broker.ask({ targetSessionId: 'target', question: 'SLOW TO LAND', from: { sessionId: 'asker' } })
+  await sleep(10)
+  assert.equal(h.delivered.length, 1, 'the initial delivery is in flight')
+  await h.broker.onActivity('target')
+  assert.equal(h.delivered.length, 1, 'no reminder rides a call before the question landed')
+  release()
+  await sleep(10)
+  await h.broker.onActivity('target')
+  assert.equal(h.delivered.length, 2, 'once landed, the reminder rides the next call')
+  const id = idOf(h.delivered[0].text)
+  h.broker.answer({ id, answer: 'ok', from: { sessionId: 'target' } })
+  await promise
+  checks.push('a reminder cannot overtake the question it belongs to')
+}
+
+// --- concurrent activity injects a reminder once ---------------------------
+{
+  const h = harness()
+  const { promise, id } = await asking(h)
+  await Promise.all([h.broker.onActivity('target'), h.broker.onActivity('target')])
+  assert.equal(h.delivered.length, 2, 'two overlapping activity events inject one reminder')
+  assert.equal(h.broker.get({ id }).reminders, 1)
+  h.broker.answer({ id, answer: 'ok', from: { sessionId: 'target' } })
+  await promise
+  checks.push('overlapping activity events cannot duplicate a reminder')
+}
+
+// --- a stopped target is never injected or woken ----------------------------
+{
+  const h = harness({ stopped: ['target'] })
+  await assert.rejects(
+    h.broker.ask({ targetSessionId: 'target', question: 'anyone?', from: { sessionId: 'asker' } }),
+    /stopped by a human/,
+  )
+  assert.equal(h.delivered.length, 0, 'a stopped target receives nothing')
+  checks.push('asking a session a person stopped is refused before delivery')
+}
+
+// --- a stop settles the question and nothing is sent to the target ----------
+{
+  const h = harness()
+  const { promise, id } = await asking(h, { question: 'WHAT IS THE PLAN?' })
+  await h.broker.onActivity('target')
+  h.stopped.add('target')
+  h.broker.onStopped('target')
+  const result = await promise
+  assert.equal(result.status, 'stopped')
+  assert.equal(result.id, id)
+  assert.match(result.note, /stopped by a human/)
+  assert.equal(h.delivered.length, 2, 'the stop adds no message to the target')
+  assert.equal(h.broker.get({ id }).state, 'stopped')
+  assert.equal(h.broker.status().pending, 0)
+  await h.broker.onActivity('target')
+  assert.equal(h.delivered.length, 2, 'a stopped target is not reminded later either')
+  checks.push('a human stop settles the question without waking the target')
 }
 
 // --- only the addressed session may answer ----------------------------------
@@ -120,11 +183,10 @@ async function asking(h, { question = 'WHICH FILE?', remindMs = 1000, timeoutMs 
   checks.push('only the addressed session can answer, and the first answer stands')
 }
 
-// --- the snapshot keeps the question readable after it settles --------------
+// --- a settled question still reports its text and answer by id -------------
 {
   const h = harness()
   const { promise, id } = await asking(h, { question: 'WHAT IS THE PLAN?' })
-  assert.equal(h.broker.get({ id }).nextReminderMs, 1000, 'a pending snapshot says when the next reminder is due')
   h.broker.answer({ id, answer: 'ship it', from: { sessionId: 'target' } })
   await promise
   const settled = h.broker.get({ id })
@@ -138,20 +200,18 @@ async function asking(h, { question = 'WHICH FILE?', remindMs = 1000, timeoutMs 
 // --- a deadline withdraws the request and tells the target ------------------
 {
   const h = harness()
-  // The deadline timer is unref'd on purpose, so keep the test loop alive long
-  // enough for it to fire — a real Harness process always is.
   const deadline = h.broker.ask({
     targetSessionId: 'target',
     question: 'NOBODY WILL ANSWER',
     from: { sessionId: 'asker' },
-    remindMs: 1000,
     timeoutMs: 25,
   })
   await sleep(40)
   const result = await deadline
   assert.equal(result.status, 'timedOut')
   assert.equal(result.id.startsWith('q-'), true)
-  assert.equal(await waitFor(() => h.delivered.some((entry) => /撤回/.test(entry.text))), true, 'the target is told the question was withdrawn')
+  await sleep(10)
+  assert.equal(h.delivered.some((entry) => /撤回/.test(entry.text)), true, 'the target is told the question was withdrawn')
   assert.equal(h.broker.status().pending, 0)
   checks.push('a deadline returns timedOut and withdraws the question')
 }
@@ -160,12 +220,12 @@ async function asking(h, { question = 'WHICH FILE?', remindMs = 1000, timeoutMs 
 {
   const h = harness()
   const controller = new AbortController()
-  const { promise, id } = await asking(h, { signal: controller.signal })
+  const { promise } = await asking(h, { signal: controller.signal })
   controller.abort()
   await assert.rejects(promise, /cancelled/)
-  assert.equal(await waitFor(() => h.delivered.some((entry) => /撤回/.test(entry.text))), true, 'the target is told about the abort')
+  await sleep(10)
+  assert.equal(h.delivered.some((entry) => /撤回/.test(entry.text)), true, 'the target is told about the abort')
   assert.equal(h.broker.status().pending, 0)
-  assert.equal(h.broker.get({ id }).state, 'cancelled')
   checks.push('an aborted caller rejects and withdraws the question')
 }
 
@@ -173,8 +233,8 @@ async function asking(h, { question = 'WHICH FILE?', remindMs = 1000, timeoutMs 
 {
   const h = harness()
   await assert.rejects(h.broker.ask({ targetSessionId: 'same', question: 'q', from: { sessionId: 'same' } }), /cannot ask itself/)
-  const first = h.broker.ask({ targetSessionId: 'b', question: 'first', from: { sessionId: 'a' }, remindMs: 1000 })
-  await waitFor(() => h.delivered.length === 1)
+  const first = h.broker.ask({ targetSessionId: 'b', question: 'first', from: { sessionId: 'a' } })
+  await sleep(5)
   await assert.rejects(h.broker.ask({ targetSessionId: 'a', question: 'second', from: { sessionId: 'b' } }), /deadlock/)
   h.broker.answer({ id: idOf(h.delivered[0].text), answer: 'ok', from: { sessionId: 'b' } })
   await first
@@ -205,39 +265,28 @@ async function asking(h, { question = 'WHICH FILE?', remindMs = 1000, timeoutMs 
   checks.push('a refused delivery rejects and leaves nothing pending')
 }
 
-// --- a vanished target stops the wait instead of hanging forever -----------
+// --- a failed injection is not counted and does not fail the question ------
 {
   let calls = 0
-  const h = harness({
-    deliver: () => {
-      calls += 1
-      return calls === 1 ? { accepted: true, startsTurn: true } : false
-    },
-  })
-  // The reminder interval is unref'd, so keep the loop alive while it fires.
-  const asking = h.broker.ask({
-    targetSessionId: 'target',
-    question: 'ANYONE THERE?',
-    from: { sessionId: 'asker' },
-    remindMs: 15,
-  }).then((value) => ({ value }), (error) => ({ error }))
-  await sleep(200)
-  const outcome = await asking
-  assert.match(String(outcome.error && outcome.error.message), /after 5 reminders/)
-  assert.equal(h.broker.status().pending, 0, 'an unreachable target leaves nothing pending')
-  checks.push('a target that disappears fails the wait instead of holding it forever')
+  const h = harness({ deliver: () => { calls += 1; return calls === 1 ? { accepted: true } : false } })
+  const { promise, id } = await asking(h)
+  await h.broker.onActivity('target')
+  assert.equal(h.broker.get({ id }).reminders, 0, 'an injection that the target refused is not counted')
+  assert.equal(h.broker.get({ id }).state, 'pending', 'and the question stays open')
+  h.broker.answer({ id, answer: 'late', from: { sessionId: 'target' } })
+  await promise
+  checks.push('a refused injection is retried on the next call instead of failing the wait')
 }
 
-// --- disposal releases every waiting caller ---------------------------------
+// --- disposal releases every waiting caller --------------------------------
 {
   const h = harness()
-  const { promise, id } = await asking(h, { remindMs: 15 })
+  const { promise, id } = await asking(h)
   h.broker.dispose()
   await assert.rejects(promise, /stopped before the target answered/)
   assert.equal(h.broker.status().pending, 0)
   assert.equal(h.broker.status().settled, 0, 'disposal forgets the table as well')
   assert.equal(h.delivered.length, 1, 'disposal sends no withdrawal the caller cannot use')
-  // Answering a question from a disposed broker is an error, not a crash.
   assert.throws(() => h.broker.answer({ id, answer: 'late', from: { sessionId: 'target' } }), /stopping/)
   checks.push('disposal releases every waiting caller and clears the table')
 }

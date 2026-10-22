@@ -39,7 +39,7 @@ ships imports a DSH package, so every layer talks through `ctx` and plain data.
 | [`lib/transcript.js`](lib/transcript.js) | Windowed transcript reads: tail/head/outline, role and sequence filters, per-message caps and the response budget. |
 | [`work-sync.js`](work-sync.js) | The **second bundle row**: mounts task-start progress sync, publishes it as the `workSync` service, and owns its own config. |
 | [`lib/work-sync.js`](lib/work-sync.js) | The sync engine itself: who to ask, claim correlation, deadlines — built only on `session/event`. |
-| [`lib/questions.js`](lib/questions.js) | Must-reply questions: the id, the blocking wait, interval reminders that name only the id, the answer, and deadlock/abort handling — delivery and the clock are injected. |
+| [`lib/questions.js`](lib/questions.js) | Must-reply questions: the id, the blocking wait, id-only reminders injected into the target's own calls, human-stop settlement, the answer, and deadlock/abort handling — delivery and the clock are injected. |
 | [`lib/workspace-grouping.js`](lib/workspace-grouping.js) | Put a session this endpoint starts into the sidebar project its directory already has. |
 
 Three rules keep the layering honest. **Services, not re-implementations**: transcript reads replay the durable
@@ -54,7 +54,7 @@ disk**: everything this plugin persists is its own state (`$DSH_HOME/mcp/*.json`
 |---|---|
 | `dsh_run_prompt` | Start a **new** DSH session and run one prompt; returns the assistant's final text and the new `sessionId`. Supports `cwd`, `agentPreset`, `permissionPreset`, `model` (`provider/model`), `wait: false`, `timeoutMs`. |
 | `dsh_continue_session` | Send a prompt to an **existing** session (resuming it if it is cold). Keeps the session's context and workspace; `permissionPreset` re-pins the session's sandbox mode and approval policy before the prompt, and `model` (`provider/model`) overrides the session's model. Without `model` the session keeps the model it already runs. |
-| `dsh_ask_session` | Ask one session a question it **must answer**, and wait for the answer. The question gets an id (`q-…`), the target is reminded about that id until it answers, and the call does not return first — the asking turn cannot end without one. Only the addressed session may answer; `remindMs` sets the reminder interval and `timeoutMs` (default 0) sets an optional deadline. |
+| `dsh_ask_session` | Ask one session a question it **must answer**, and wait for the answer. The question gets an id (`q-…`), and the call does not return first — the asking turn cannot end without one. Only the addressed session may answer; while the question is open, the id-only reminder is injected into the target's own next steps (never a wake-up). `timeoutMs` (default 0) sets an optional deadline. |
 | `dsh_answer_question` | Answer a must-reply question by id, from the addressed session. The waiting `dsh_ask_session` call returns this text and the asking turn continues. |
 | `dsh_get_question` | Read a must-reply question by id: its text, who asked, when, how many reminders were sent, and the answer once it exists. Reminders carry only the id; this is how the target reads the question again. |
 | `dsh_list_commands` | The slash commands a session's agent can currently run: the global command layer plus whatever that agent's preset composes, so availability differs per agent preset. |
@@ -333,24 +333,34 @@ turns one session's question into a request that stays open:
 - **One id per question.** The question is delivered once, in full, and gets an id (`q-…`). The call
   blocks: the asking turn cannot end before the target answers, so the answer always reaches the work
   that needs it.
-- **Reminders name the id, not the question.** While the request is open the target is reminded every
-  `remindMs` (default 60 s, minimum 5 s) — but never while it is already running a turn, so reminders
-  cannot pile up behind a long answer. The reminder carries the id and the two calls, not the question
-  again; `dsh_get_question` is how the target reads it again.
+- **Reminders ride calls the target already makes.** There is no reminder timer and no "reminder
+  turn": when the target is about to run a model step, the id-only reminder is injected into that
+  step's context (the Harness's no-wake `inject` path). An idle or manually stopped session is never
+  woken just to be reminded, and the turn start and its first step produce one reminder, not two. The
+  reminder carries the id and the two calls, never the question again; `dsh_get_question` is how the
+  target reads it again.
 - **Only the addressed session can answer.** `dsh_answer_question` checks the caller's session id
   against the request's target, so another session (or an external MCP client, which has no session)
   cannot settle it. The first answer stands; repeating it reports `alreadyAnswered`.
+- **A human stop wins.** A turn the person stopped (`turn/end` with an `aborted` reason caused by
+  `user`) settles the open question with `status: "stopped"` and nothing is sent to that session — no
+  reminder, no withdrawal, no new turn. Asking a session whose latest recorded turn was such a stop is
+  refused before delivery (also after a reload), so a question can never be what resumes it; resuming
+  the session normally clears the stop.
 - **The wait can be ended deliberately, never silently.** `timeoutMs: 0` (the default) waits until
   answered; a positive value returns `status: "timedOut"`. A cancelled asking turn, a closed HTTP
   request, or a plugin reload rejects the call, and the target receives one "withdrawn" line so it
-  stops working on a question nobody is waiting for; a target that cannot be reached for five
-  consecutive reminders fails the wait instead of holding it forever.
+  stops working on a question nobody is waiting for.
 - **Self-asks and deadlocks are refused before delivery.** Asking yourself is pointless; asking a
   session that is already (directly or transitively) waiting on a must-reply question from you would
   deadlock both turns, so it is refused with the chain named.
 - **It needs an answer path.** The target answers through this endpoint's DSH-local tools, so the
   request is refused while `exposeToDsh` is off (a question nobody can answer would only hang).
   An external MCP caller may ask too, but only the addressed DSH session can answer.
+
+The endpoint's one `session/event` listener exists for exactly these two facts — a target about to
+run a step, and a target a person stopped. The task-start sync engine is still the separate
+`dsh-work-sync` row.
 
 `dsh_status` reports `questions: { pending, settled }`.
 
@@ -658,12 +668,12 @@ node test/mcp-self-test.mjs            # 11 transport checks, no Harness needed
 node test/contracts-test.mjs           # 6 checks: the Harness wire shapes, pinned in one place
 node test/authority-test.mjs           # 5 checks: the sandbox ladder, containment, and the cwd clamp
 node test/transcript-test.mjs          # 7 checks: transcript windows, cursors, caps and the response budget
-node test/questions-test.mjs           # 12 checks: must-reply ids, reminders (id only), answers, deadlines, aborts, deadlocks
+node test/questions-test.mjs           # 16 checks: must-reply ids, injected id-only reminders, human stops, answers, deadlines, aborts, deadlocks
 node test/work-sync-test.mjs           # 18 checks: the progress-sync engine against a fake Harness
 node test/work-sync-plugin-test.mjs    # 5 checks: the sync bundle row's service, messages, switch, disposal
 node test/turn-wait-test.mjs          # 2 checks: which turn a queued or steered prompt reports
 node test/client-half-test.mjs         # 18 checks: the browser half's bundle page, its row page, its route
-node test/plugin-integration-test.mjs  # 122 checks: apply(), endpoint file + advertised URL, tools,
+node test/plugin-integration-test.mjs  # 123 checks: apply(), endpoint file + advertised URL, tools,
                                        # transcript windows, outline/paging/truncation, search, index
                                        # cursors, pending user decisions (PTC included), parked approvals
                                        # and questions answered over MCP, waiting, caller identity +

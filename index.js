@@ -26,10 +26,10 @@ import { createQuestionBroker } from './lib/questions.js'
 import { McpGateway, SERVER_NAME } from './lib/protocol.js'
 import { registerDshTools } from './lib/dsh-tools-bridge.js'
 import { groupOwnedSessions } from './lib/workspace-grouping.js'
-import { errorText } from './lib/dsh-contracts.js'
+import { errorText, sessionIdOf } from './lib/dsh-contracts.js'
 
 /** Keep in sync with package.json; reported through `initialize`. */
-const VERSION = '0.20.0'
+const VERSION = '0.20.1'
 
 /** This package's own name, as the profile's bundle row spells it. */
 const PACKAGE_NAME = (() => {
@@ -285,27 +285,101 @@ export function apply(ctx, config = {}) {
   })
 
   /**
+   * Sessions a person stopped.
+   *
+   * Kept here rather than in the broker because the fact comes from the event
+   * stream, and the broker only decides what a question does about it: nothing
+   * that wakes the session, ever.
+   */
+  const humanStops = new Set()
+
+  /**
    * Must-reply questions, held open across the asking turn.
    *
-   * Delivery is the same internal path every other cross-session message uses;
-   * the running check only suppresses reminders while the target already has a
-   * turn, so a slow answer does not queue a pile of them.
+   * The initial question uses the ordinary internal delivery path. Reminders do
+   * not: they are injected into the target's next model call, so an idle or
+   * stopped session is never woken just to be reminded.
    */
   const questionDelivery = createInternalDelivery({ ctx, logger: log, kind: MCP_MESSAGE_KIND })
   const questions = createQuestionBroker({
     logger: log,
     deliver: (sessionId, text, meta) => questionDelivery.deliver(sessionId, text, meta),
-    isRunning: (sessionId) => {
-      try {
-        return ctx.get('agents')?.get?.(sessionId)?.status === 'running'
-      } catch {
-        return false
-      }
-    },
+    isStopped: (sessionId) => humanStops.has(sessionId),
     // Without the local tool surface the target could not answer at all, so a
     // must-reply question would only hang; refusing is the honest answer.
     canAnswer: () => exposeToDsh && dshToolsState.names.length > 0,
   })
+
+  /**
+   * Whether the newest recorded turn of a session ended because a person
+   * stopped it.
+   *
+   * The live flag covers a stop this activation saw; the recorded log covers
+   * one that happened before a reload or a restart, when asking a cold session
+   * would otherwise resume it just to deliver a question.
+   */
+  async function sessionStoppedByHuman(sessionId) {
+    if (humanStops.has(sessionId)) return true
+    const query = ctx.get('sessionQuery')
+    if (typeof query?.readSession !== 'function') return false
+    try {
+      const snapshot = await query.readSession(sessionId)
+      const events = Array.isArray(snapshot?.events) ? snapshot.events : []
+      for (let index = events.length - 1; index >= 0; index -= 1) {
+        const event = events[index]
+        if (event?.type === 'turn/start') return false
+        if (event?.type !== 'turn/end') continue
+        const reason = event.data?.reason
+        return reason?.kind === 'aborted' && reason.reason?.kind === 'user'
+      }
+      return false
+    } catch (error) {
+      log('debug', 'session stop state lookup failed', { sessionId, error: errorText(error) })
+      return false
+    }
+  }
+
+  /**
+   * Feed the question broker the two session facts it needs.
+   *
+   * A turn or step that is about to happen is where an open reminder rides
+   * along — injected, never a wake-up of its own. A turn a person aborted is
+   * the opposite: the question is settled on the spot and nothing else is sent,
+   * so a stopped session stays stopped.
+   */
+  ctx.effect(() => {
+    if (typeof ctx.on !== 'function') return () => {}
+    const off = ctx.on('session/event', (session, event) => {
+      try {
+        const sessionId = sessionIdOf(session)
+        if (!sessionId || typeof event?.type !== 'string') return
+        if (event.type === 'turn/start') {
+          humanStops.delete(sessionId)
+          void questions.onActivity(sessionId).catch((error) => {
+            log('debug', 'question reminder injection failed', { sessionId, error: errorText(error) })
+          })
+          return
+        }
+        if (event.type === 'step/start') {
+          void questions.onActivity(sessionId).catch((error) => {
+            log('debug', 'question reminder injection failed', { sessionId, error: errorText(error) })
+          })
+          return
+        }
+        if (event.type !== 'turn/end') return
+        const reason = event.data?.reason
+        if (reason?.kind === 'aborted' && reason.reason?.kind === 'user') {
+          humanStops.add(sessionId)
+          questions.onStopped(sessionId)
+        }
+      } catch (error) {
+        log('debug', 'question liveness handling failed', { error: errorText(error) })
+      }
+    })
+    return () => {
+      if (typeof off === 'function') off()
+    }
+  }, 'dsh-mcp-server: must-reply question liveness')
 
   /**
    * The work-sync row's service, when that bundle is installed and loaded.
@@ -365,6 +439,7 @@ export function apply(ctx, config = {}) {
     openSession: queueOpenSession,
     syncStatus: () => workSyncStatus(),
     questions,
+    sessionStopped: sessionStoppedByHuman,
   })
 
   dshToolsState.published = capabilities.tools.map((tool) => tool.name)
