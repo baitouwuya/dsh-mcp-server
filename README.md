@@ -334,11 +334,12 @@ turns one session's question into a request that stays open:
   blocks: the asking turn cannot end before the target answers, so the answer always reaches the work
   that needs it.
 - **Reminders ride calls the target already makes.** There is no reminder timer and no "reminder
-  turn": when the target is about to run a model step, the id-only reminder is injected into that
-  step's context (the Harness's no-wake `inject` path). An idle or manually stopped session is never
-  woken just to be reminded, and the turn start and its first step produce one reminder, not two. The
-  reminder carries the id and the two calls, never the question again; `dsh_get_question` is how the
-  target reads it again.
+  turn": on every turn, step, assistant message and tool result the id-only reminder is injected into
+  the target's next call (the Harness's no-wake `inject` path; a running handle that lacks `inject` is
+  steered instead). An idle or manually stopped session is never woken just to be reminded, and events
+  closer together than one second produce one reminder. If an activity arrives while the question is
+  still in flight, the reminder is sent as soon as the question lands. The reminder carries the id and
+  the two calls, never the question again; `dsh_get_question` is how the target reads it again.
 - **Only the addressed session can answer.** `dsh_answer_question` checks the caller's session id
   against the request's target, so another session (or an external MCP client, which has no session)
   cannot settle it. The first answer stands; repeating it reports `alreadyAnswered`.
@@ -362,7 +363,10 @@ The endpoint's one `session/event` listener exists for exactly these two facts â
 run a step, and a target a person stopped. The task-start sync engine is still the separate
 `dsh-work-sync` row.
 
-`dsh_status` reports `questions: { pending, settled }`.
+`dsh_status` reports `questions: { pending, settled, activity }`, where `activity` counts the
+call events seen, the reminders injected, the refusals and the last refusal reason (`not-live`,
+`no-inject`, `inject-threw`, `steer-threw`, â€¦), per event kind. It is how a deployment can tell
+"the target never ran" from "the Harness refused the injection".
 
 ## Task-start progress sync
 

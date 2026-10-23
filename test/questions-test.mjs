@@ -72,8 +72,12 @@ async function asking(h, { question = 'WHICH FILE?', timeoutMs = 0, signal, from
   const { promise, id } = await asking(h, { question: 'A SECRET QUESTION' })
   await sleep(30)
   assert.equal(h.delivered.length, 1, 'no timer pushes a reminder by itself')
-  await h.broker.onActivity('target')
+  await h.broker.onActivity('target', 'turn/start')
   assert.equal(h.delivered.length, 2, 'an activity event injects a reminder')
+  const status = h.broker.status()
+  assert.equal(status.activity.calls >= 1, true, 'activity calls are counted')
+  assert.equal(status.activity.injections, 1, 'accepted injections are counted')
+  assert.equal(status.activity.byKind['turn/start'], 1, 'the event kind is reported')
   const reminder = h.delivered[1]
   assert.equal(reminder.meta.inject, true, 'the reminder is injected, not turned into a turn')
   assert.match(reminder.text, new RegExp('#' + id), 'the reminder carries the id')
@@ -112,12 +116,13 @@ async function asking(h, { question = 'WHICH FILE?', timeoutMs = 0, signal, from
   const promise = h.broker.ask({ targetSessionId: 'target', question: 'SLOW TO LAND', from: { sessionId: 'asker' } })
   await sleep(10)
   assert.equal(h.delivered.length, 1, 'the initial delivery is in flight')
-  await h.broker.onActivity('target')
+  await h.broker.onActivity('target', 'turn/start')
   assert.equal(h.delivered.length, 1, 'no reminder rides a call before the question landed')
   release()
   await sleep(10)
-  await h.broker.onActivity('target')
-  assert.equal(h.delivered.length, 2, 'once landed, the reminder rides the next call')
+  assert.equal(h.delivered.length, 2, 'the deferred reminder is injected as soon as the question lands')
+  await h.broker.onActivity('target', 'step/start')
+  assert.equal(h.delivered.length, 2, 'and the dedupe window absorbs the next event')
   const id = idOf(h.delivered[0].text)
   h.broker.answer({ id, answer: 'ok', from: { sessionId: 'target' } })
   await promise
@@ -268,14 +273,27 @@ async function asking(h, { question = 'WHICH FILE?', timeoutMs = 0, signal, from
 // --- a failed injection is not counted and does not fail the question ------
 {
   let calls = 0
-  const h = harness({ deliver: () => { calls += 1; return calls === 1 ? { accepted: true } : false } })
+  const h = harness({
+    deliver: () => {
+      calls += 1
+      if (calls === 1) return { accepted: true }
+      if (calls === 2) return false
+      return { accepted: true }
+    },
+  })
   const { promise, id } = await asking(h)
-  await h.broker.onActivity('target')
+  await h.broker.onActivity('target', 'assistant/message')
   assert.equal(h.broker.get({ id }).reminders, 0, 'an injection that the target refused is not counted')
   assert.equal(h.broker.get({ id }).state, 'pending', 'and the question stays open')
+  const failed = h.broker.status().activity
+  assert.equal(failed.failures >= 1, true, 'the refused injection is counted as a failure')
+  assert.equal(failed.lastFailure, 'refused', 'and the reason is reported')
+  h.advance(1001)
+  await h.broker.onActivity('target', 'step/start')
+  assert.equal(h.broker.get({ id }).reminders, 1, 'the next activity event retries successfully')
   h.broker.answer({ id, answer: 'late', from: { sessionId: 'target' } })
   await promise
-  checks.push('a refused injection is retried on the next call instead of failing the wait')
+  checks.push('a refused injection is counted, explained, and retried on the next call')
 }
 
 // --- disposal releases every waiting caller --------------------------------

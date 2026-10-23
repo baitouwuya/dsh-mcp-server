@@ -29,7 +29,7 @@ import { groupOwnedSessions } from './lib/workspace-grouping.js'
 import { errorText, sessionIdOf } from './lib/dsh-contracts.js'
 
 /** Keep in sync with package.json; reported through `initialize`. */
-const VERSION = '0.20.1'
+const VERSION = '0.20.2'
 
 /** This package's own name, as the profile's bundle row spells it. */
 const PACKAGE_NAME = (() => {
@@ -353,15 +353,16 @@ export function apply(ctx, config = {}) {
       try {
         const sessionId = sessionIdOf(session)
         if (!sessionId || typeof event?.type !== 'string') return
-        if (event.type === 'turn/start') {
-          humanStops.delete(sessionId)
-          void questions.onActivity(sessionId).catch((error) => {
-            log('debug', 'question reminder injection failed', { sessionId, error: errorText(error) })
-          })
-          return
-        }
-        if (event.type === 'step/start') {
-          void questions.onActivity(sessionId).catch((error) => {
+        if (event.type === 'turn/start') humanStops.delete(sessionId)
+        // Every kind of call the target is about to make is a chance to ride
+        // along with the reminder. None of them opens a turn by itself.
+        if (
+          event.type === 'turn/start'
+          || event.type === 'step/start'
+          || event.type === 'assistant/message'
+          || event.type === 'tool/result'
+        ) {
+          void questions.onActivity(sessionId, event.type).catch((error) => {
             log('debug', 'question reminder injection failed', { sessionId, error: errorText(error) })
           })
           return
