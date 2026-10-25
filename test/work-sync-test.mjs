@@ -12,7 +12,7 @@ import { createWorkSync } from '../lib/work-sync.js'
 const checks = []
 
 /** One engine, one fake Harness, one injectable clock. */
-function harness({ rows = [], enabled = true, cooldownMs = 300_000, waitMs = 120_000, maxPeers = 3, steered = false, defer = null, deliverResult = undefined } = {}) {
+function harness({ rows = [], enabled = true, cooldownMs = 300_000, waitMs = 120_000, maxPeers = 3, steered = false, defer = null, deliverResult = undefined, guard = null } = {}) {
   const handlers = new Map()
   const delivered = []
   const logs = []
@@ -29,6 +29,11 @@ function harness({ rows = [], enabled = true, cooldownMs = 300_000, waitMs = 120
     logger: (level, message, detail) => logs.push({ level, message, detail }),
     listSessions: async () => rows,
     deliver: async (target, message) => {
+      // Model the Harness's session-append reentry guard: a delivery made from
+      // inside a session/event listener must wait for the commit to close.
+      if (typeof guard === 'function' && guard()) {
+        throw new Error('session append cannot reenter while another append is being published')
+      }
       if (defer) await defer.promise
       delivered.push({ target, text: message.text, meta: message.meta })
       if (deliverResult) return deliverResult(target, message)
@@ -122,6 +127,26 @@ assert.equal(report.meta.from, 'peer')
 assert.match(report.text, /\/work\/lib\/x\.js/)
 assert.match(report.text, /协商/)
 checks.push('notice, claim, answer and report complete one round without starting another')
+
+// --- a delivery from inside a session commit waits for the commit -----------
+{
+  let committing = false
+  const guarded = harness({ rows: world, guard: () => committing })
+  await guarded.turn('asker', 2)
+  await guarded.settle()
+  await guarded.claim('peer', 'asker')
+  await guarded.settle()
+  committing = true
+  const reportInsideCommit = guarded.message('peer', 'I am editing /work/lib/rowdy.js first', 2, 2)
+  // The live loop closes its commit before the listener's next microtask runs.
+  committing = false
+  await reportInsideCommit
+  await guarded.settle()
+  assert.equal(guarded.delivered.length, 2, 'the report delivery waited for the commit to close')
+  assert.equal(guarded.delivered[1].target, 'asker')
+  checks.push('a delivery from inside a session commit waits for the commit to close')
+}
+
 
 // --- a finished asker is not woken ------------------------------------------
 // The report can only influence work that is still running: once the asker's

@@ -129,6 +129,28 @@ async function asking(h, { question = 'WHICH FILE?', timeoutMs = 0, signal, from
   checks.push('a reminder cannot overtake the question it belongs to')
 }
 
+// --- a delivery triggered inside a session commit waits for it to close -----
+{
+  let committing = false
+  const h = harness({
+    deliver: async () => {
+      if (committing) throw new Error('session append cannot reenter while another append is being published')
+      return { accepted: true }
+    },
+  })
+  const { promise, id } = await asking(h)
+  committing = true
+  const activity = h.broker.onActivity('target', 'step/start')
+  // The event listener returns to the session commit before the next line runs;
+  // the delivery itself must wait for that commit to close.
+  committing = false
+  await activity
+  assert.equal(h.broker.get({ id }).reminders, 1, 'the injection waited for the commit to close')
+  h.broker.answer({ id, answer: 'ok', from: { sessionId: 'target' } })
+  await promise
+  checks.push('an injection triggered inside a session commit waits for it to close')
+}
+
 // --- concurrent activity injects a reminder once ---------------------------
 {
   const h = harness()

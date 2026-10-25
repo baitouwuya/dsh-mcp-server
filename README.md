@@ -646,6 +646,23 @@ The committed `cordis.patch.yml` carries **no literal token** (this is a public 
 `DSH_MCP_TOKEN` in the Harness environment, or patch the `mcp-dsh-selfcheck` row from your own
 private profile, with the token the server is configured with.
 
+## DSH compatibility
+
+The bundle imports no DSH package, so compatibility is a question of service contracts rather than a
+version pin. It is checked against **DSH 0.2.1-rc.3** (Cordis 4.0.5) on the live Harness: the session
+controller (`list`, `resolveAgent`, `create`, `cancel`, `follow`, `selectModel`), `sessionQuery`,
+the live `agents` registry and its handle methods (`followup`, `steer`, `inject`), `permissionPresets`,
+`commands`, `workspaceRegistry`, `configEditor`, `clientModules`, the web-server route, the
+`session/event` shapes and turn-end reasons, and the Web module loader's seed (`react`,
+`@deepseek-ai/dsh-client-ui-primitives`, `…-ui-slots`, …) with the `plugins.row.config` /
+`plugins.bundle.config` slot keys.
+
+One Harness rule matters for any plugin that reacts to `session/event`: a listener runs **inside the
+session's append commit**, where a nested append is rejected (`session append cannot reenter while
+another append is being published`). Every delivery this bundle makes from a listener — a must-reply
+reminder injection or withdrawal, a work-sync report or timeout line — yields one microtask before
+delivering, so the commit has closed first.
+
 ## Model Experience
 
 What a calling model sees, and why it was shaped that way:
@@ -672,8 +689,8 @@ node test/mcp-self-test.mjs            # 11 transport checks, no Harness needed
 node test/contracts-test.mjs           # 6 checks: the Harness wire shapes, pinned in one place
 node test/authority-test.mjs           # 5 checks: the sandbox ladder, containment, and the cwd clamp
 node test/transcript-test.mjs          # 7 checks: transcript windows, cursors, caps and the response budget
-node test/questions-test.mjs           # 16 checks: must-reply ids, injected id-only reminders, human stops, answers, deadlines, aborts, deadlocks
-node test/work-sync-test.mjs           # 18 checks: the progress-sync engine against a fake Harness
+node test/questions-test.mjs           # 17 checks: must-reply ids, injected id-only reminders, human stops, answers, deadlines, aborts, deadlocks
+node test/work-sync-test.mjs           # 19 checks: the progress-sync engine against a fake Harness
 node test/work-sync-plugin-test.mjs    # 5 checks: the sync bundle row's service, messages, switch, disposal
 node test/turn-wait-test.mjs          # 2 checks: which turn a queued or steered prompt reports
 node test/client-half-test.mjs         # 18 checks: the browser half's bundle page, its row page, its route
