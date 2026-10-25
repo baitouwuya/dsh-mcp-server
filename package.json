@@ -48,6 +48,8 @@
     "locale",
     "icon.svg",
     "README.md",
+    "README.en.md",
+    "docs",
     "cordis.patch.yml"
   ],
   "dsh": {
