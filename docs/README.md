@@ -39,3 +39,4 @@ README 只说明能做什么，具体细节按主题拆到下面的文件；两�
    (`> Part of [DSH MCP Server](../README.en.md) · [Docs index](../README.md)` /
    `> 属于 [DSH MCP Server](../README.md) · [文档索引](../README.md)`).
 3. Link the page from both READMEs' documentation table and from the tables above.
+4. Run `npm run check:docs` (CI runs it too): it verifies every relative link and anchor, and that `docs/zh/` keeps the same headings, tables, fences and inline identifiers as `docs/en/`.

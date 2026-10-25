@@ -15,6 +15,8 @@ ships imports a DSH package, so every layer talks through `ctx` and plain data.
 | [`lib/protocol.js`](../../lib/protocol.js) | MCP wire: JSON-RPC envelope, protocol-version negotiation, error codes, gateway dispatch. |
 | [`lib/http-route.js`](../../lib/http-route.js) / [`bin/dsh-mcp-stdio.mjs`](../../bin/dsh-mcp-stdio.mjs) | The two transports: Streamable HTTP on the Harness listener, and a stdio bridge that forwards to that same endpoint. |
 | [`lib/dsh-capabilities.js`](../../lib/dsh-capabilities.js) | The DSH-facing tools and resources; each maps onto live services (`sessionController`, `sessionQuery`, `tools`, …). |
+| [`lib/capabilities/definitions.js`](../../lib/capabilities/definitions.js) | The static catalogue: every tool schema and the three `dsh://` resource descriptors, so the caller-facing contract can be read without the live-service plumbing. |
+| [`lib/capabilities/requests.js`](../../lib/capabilities/requests.js) | User decisions: the pure fold that reads pending approvals and questions out of a session log, plus the injected parking/answering hooks that let an MCP caller settle one. |
 | [`lib/authority.js`](../../lib/authority.js) | The authority arithmetic those tools are clamped by: the sandbox ladder, workspace containment, and the `cwd` clamp. |
 | [`lib/dsh-contracts.js`](../../lib/dsh-contracts.js) | The shape of the events and messages the tools read: session ids, message prose, transcript rows, turn numbers, failure text — one definition instead of a copy per caller. Transport-level error formatting stays with the transport. |
 | [`lib/dsh-tools-bridge.js`](../../lib/dsh-tools-bridge.js) | The same table exposed *into* DSH: the three-tool front door or the full registry installed in the injected tools scope, plus tools opened lazily in the calling agent's own scope. |
@@ -76,7 +78,7 @@ node test/contracts-test.mjs           # 6 checks: the Harness wire shapes, pinn
 node test/authority-test.mjs           # 5 checks: the sandbox ladder, containment, and the cwd clamp
 node test/transcript-test.mjs          # 7 checks: transcript windows, cursors, caps and the response budget
 node test/questions-test.mjs           # 17 checks: must-reply ids, injected id-only reminders, human stops, answers, deadlines, aborts, deadlocks
-node test/work-sync-test.mjs           # 19 checks: the progress-sync engine against a fake Harness
+node test/work-sync-test.mjs           # 22 checks: the progress-sync engine against a fake Harness
 node test/work-sync-plugin-test.mjs    # 5 checks: the sync bundle row's service, messages, switch, disposal
 node test/turn-wait-test.mjs          # 2 checks: which turn a queued or steered prompt reports
 node test/client-half-test.mjs         # 18 checks: the browser half's bundle page, its row page, its route
@@ -96,6 +98,8 @@ node test/live-e2e-test.mjs            # 46 checks over HTTP: protocol, resource
                                        # archive/unarchive, permission presets, commands, error paths,
                                        # 4 real turns (needs a Harness)
 ```
+
+`npm run check:docs` guards the Markdown instead: every relative link and anchor resolves, and `docs/zh/` keeps the same heading levels, tables, code fences and inline identifiers as `docs/en/`. CI (`.github/workflows/ci.yml`) runs both.
 
 The bridge's schema projection was verified against the Harness's **own** JSON-Schema validator
 (extracted from the app bundle): 15 of the 21 raw MCP schemas use `minLength`, a keyword that validator

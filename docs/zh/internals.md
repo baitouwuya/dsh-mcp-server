@@ -14,6 +14,8 @@
 | [`lib/protocol.js`](../../lib/protocol.js) | MCP 传输层：JSON-RPC 信封、协议版本协商、错误码、网关分派。 |
 | [`lib/http-route.js`](../../lib/http-route.js) / [`bin/dsh-mcp-stdio.mjs`](../../bin/dsh-mcp-stdio.mjs) | 两种传输方式：Harness 监听器上的 Streamable HTTP，以及转发到同一端点的 stdio 桥接器。 |
 | [`lib/dsh-capabilities.js`](../../lib/dsh-capabilities.js) | 面向 DSH 的工具和资源；每一项都映射到活的服务（`sessionController`、`sessionQuery`、`tools` 等）。 |
+| [`lib/capabilities/definitions.js`](../../lib/capabilities/definitions.js) | 静态目录：全部工具 schema 与 3 个 `dsh://` 资源描述，使面向调用方的契约不必穿过活服务管线即可阅读。 |
+| [`lib/capabilities/requests.js`](../../lib/capabilities/requests.js) | 用户决策：从会话日志折出待决审批与提问的纯函数，以及让 MCP 调用方结算它们的挂起/应答钩子（活的部分由外部注入）。 |
 | [`lib/authority.js`](../../lib/authority.js) | 这些工具受其约束的权限计算：沙箱阶梯、工作区包含关系，以及 `cwd` 钳制。 |
 | [`lib/dsh-contracts.js`](../../lib/dsh-contracts.js) | 工具所读取的事件和消息形态：会话 id、消息正文、对话记录行、回合编号、失败文本——只定义一次，而不是每个调用方各复制一份。传输层级的错误格式化仍留在传输层。 |
 | [`lib/dsh-tools-bridge.js`](../../lib/dsh-tools-bridge.js) | 同一张表暴露*进* DSH 内部：三个工具的入口，或安装到注入工具作用域的完整注册表，以及在调用智能体自身作用域中惰性打开的工具。 |
@@ -51,7 +53,7 @@ node test/contracts-test.mjs           # 6 checks: the Harness wire shapes, pinn
 node test/authority-test.mjs           # 5 checks: the sandbox ladder, containment, and the cwd clamp
 node test/transcript-test.mjs          # 7 checks: transcript windows, cursors, caps and the response budget
 node test/questions-test.mjs           # 17 checks: must-reply ids, injected id-only reminders, human stops, answers, deadlines, aborts, deadlocks
-node test/work-sync-test.mjs           # 19 checks: the progress-sync engine against a fake Harness
+node test/work-sync-test.mjs           # 22 checks: the progress-sync engine against a fake Harness
 node test/work-sync-plugin-test.mjs    # 5 checks: the sync bundle row's service, messages, switch, disposal
 node test/turn-wait-test.mjs          # 2 checks: which turn a queued or steered prompt reports
 node test/client-half-test.mjs         # 18 checks: the browser half's bundle page, its row page, its route
@@ -71,6 +73,8 @@ node test/live-e2e-test.mjs            # 46 checks over HTTP: protocol, resource
                                        # archive/unarchive, permission presets, commands, error paths,
                                        # 4 real turns (needs a Harness)
 ```
+
+`npm run check:docs` 守的是 Markdown：每个相对链接与锚点都可解析，`docs/zh/` 与 `docs/en/` 保持相同的标题层级、表格、代码围栏和行内标识符。CI（`.github/workflows/ci.yml`）两者都跑。
 
 桥接器的 schema 投影已针对 Harness **自身**的 JSON-Schema 校验器（从应用包中提取）验证：21 个原始 MCP schema 中有 15 个使用了 `minLength`，而该校验器会直接拒绝这个关键字；全部 21 个投影后的 schema——以及各种形态的规范值——都能被接受。
 

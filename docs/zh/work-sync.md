@@ -31,6 +31,6 @@
 默认开启：一次只运行一个智能体的部署不付任何代价，因为没有同伴在运行时绝不会发送通知。
 在 **dsh-work-sync 行**上设置 `syncOnStart: false` 可以关闭它；插件页上的开关保存的就是那一行，
 而高级调节项（`syncCooldownMs`、`syncWaitMs`、`syncMaxPeers`）在那里只能通过配置修改。
-`dsh_status` 会报告 `sync: { enabled, present, peersAsked, pending, reports }`；没有该行时本端点
+`dsh_status` 会报告 `sync: { enabled, present, peersAsked, pending, reports }`；每个 `peersAsked` 条目都写明双方（`asker`、`peer`，兼容保留的 `sessionId`，以及发起提问的 `turn`），因此“多个子代理各问同一 peer”与“同一发起方重复问”可以区分；没有该行时本端点
 正常运行、报告 `present: false`，并拒绝保存开关，同时在消息中说明需要添加哪一行。
 `GET /mcp-config` 报告开关本身。

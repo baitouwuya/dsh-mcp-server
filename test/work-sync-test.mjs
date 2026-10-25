@@ -290,6 +290,76 @@ await overlap.settle()
 assert.equal(overlap.delivered.length, 1, 'two overlapping rounds ask the peer once')
 checks.push('overlapping rounds ask one peer once')
 
+// --- one ask per turn, even with the cooldown switched off -------------------
+// The live symptom: the same peer recorded several times within seconds. A
+// repeated or replayed turn/start is the same task start, so it must not ask
+// again even when syncCooldownMs: 0 disables the time-based cooldown; and every
+// record must name the session that asked, or a legitimate fan-in can never be
+// told apart from a duplicate.
+const once = harness({ rows: world, cooldownMs: 0 })
+await once.turn('asker', 1)
+await once.settle()
+assert.equal(once.delivered.length, 1)
+const askedOnce = once.sync.status().peersAsked
+assert.equal(askedOnce.length, 1)
+assert.equal(askedOnce[0].sessionId, 'peer', 'the old peer id field is kept')
+assert.equal(askedOnce[0].peer, 'peer')
+assert.equal(askedOnce[0].asker, 'asker', 'the record names the session that asked')
+assert.equal(askedOnce[0].turn, 1, 'the record names the turn that asked')
+await once.turn('asker', 1)
+await once.settle()
+assert.equal(once.delivered.length, 1, 'a repeated turn/start for the same turn asks nobody again')
+await once.end('asker', 1)
+await once.settle()
+await once.turn('asker', 1)
+await once.settle()
+assert.equal(once.delivered.length, 1, 'a replayed turn/start cannot re-ask after its pending question was dropped')
+await once.turn('asker', 2)
+await once.settle()
+assert.equal(once.delivered.length, 2, 'a new turn is a new round, and the cooldown is off')
+checks.push('a repeated turn/start asks once, and the record names its asker and turn')
+
+// --- one peer, several askers: each ask is real and attributable ------------
+// Three sub-agents of the same root each start a task. The root is asked once
+// per asker — a genuine fan-in, which is kept — and every record carries its
+// asker, so a repeated peer id in dsh_status.sync is explainable.
+const fanIn = harness({
+  rows: [
+    { sessionId: 'root', running: true, cwd: '/work', updatedAt: 10 },
+    { sessionId: 'kid-1', running: true, cwd: '/work', updatedAt: 11, parentSessionId: 'root' },
+    { sessionId: 'kid-2', running: true, cwd: '/work', updatedAt: 12, parentSessionId: 'root' },
+    { sessionId: 'kid-3', running: true, cwd: '/work', updatedAt: 13, parentSessionId: 'root' },
+  ],
+})
+await fanIn.turn('kid-1')
+await fanIn.settle()
+await fanIn.turn('kid-2')
+await fanIn.settle()
+await fanIn.turn('kid-3')
+await fanIn.settle()
+assert.deepEqual(ids(fanIn.delivered), ['root', 'root', 'root'], 'each asker questions the shared root once')
+const fanAsked = fanIn.sync.status().peersAsked
+assert.equal(fanAsked.length, 3, 'three questions to one peer are three records, not one collapsed record')
+assert.deepEqual(fanAsked.map((entry) => entry.sessionId), ['root', 'root', 'root'], 'sessionId still says which peer was asked')
+assert.deepEqual(fanAsked.map((entry) => entry.asker).sort(), ['kid-1', 'kid-2', 'kid-3'], 'each record names a distinct asker')
+const fanWaiting = fanIn.sync.status().pending
+assert.equal(fanWaiting.length, 3)
+assert.deepEqual(fanWaiting.map((entry) => entry.asker).sort(), ['kid-1', 'kid-2', 'kid-3'], 'one pending question per asker')
+checks.push('several askers asking one peer each ask once, and each record names its asker')
+
+// --- a finished turn leaves no pending question behind ----------------------
+const cleanup = harness({ rows: world })
+await cleanup.turn('asker', 1)
+await cleanup.settle()
+assert.deepEqual(cleanup.sync.status().pending.map((entry) => entry.asker), ['asker'])
+await cleanup.end('asker', 1)
+await cleanup.settle()
+assert.deepEqual(cleanup.sync.status().pending, [], 'the asker\'s turn ending drops what it can no longer use')
+const cleanupAsked = cleanup.sync.status().peersAsked
+assert.equal(cleanupAsked.length, 1, 'the question is still on record for attribution')
+assert.equal(cleanupAsked[0].asker, 'asker', 'and the record still names its asker')
+checks.push('a turn/end clears pending questions and keeps the attributable record')
+
 // --- status and disposal ----------------------------------------------------
 const status = JSON.parse(JSON.stringify(loop.sync.status()))
 assert.equal(status.enabled, true)

@@ -34,6 +34,6 @@ endpoint never mounts the engine itself: it reads `ctx.get('workSync')` for the 
 On by default: a deployment running one agent at a time pays nothing, because no notice is ever sent when
 no peer is running. `syncOnStart: false` on the **dsh-work-sync row** turns it off; the switch on the Plugins
 page saves that row, and the advanced knobs (`syncCooldownMs`, `syncWaitMs`, `syncMaxPeers`) are
-configuration-only there. `dsh_status` reports `sync: { enabled, present, peersAsked, pending, reports }`;
+configuration-only there. `dsh_status` reports `sync: { enabled, present, peersAsked, pending, reports }`; each `peersAsked` entry names both sides (`asker`, `peer`, the compatibility `sessionId`, and the `turn` that asked), so a peer questioned by several sub-agents reads differently from one asker re-asking it;
 without the row this endpoint runs normally, reports `present: false`, and refuses to save the switch with a
 message naming the row to add. `GET /mcp-config` reports the switch itself.
