@@ -13,34 +13,15 @@ import assert from 'node:assert/strict'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
+import { TOOL_DEFINITIONS } from '../lib/capabilities/definitions.js'
+
 const endpointFile = process.env.DSH_MCP_ENDPOINT_FILE
   ?? join(process.env.DSH_HOME ?? join(homedir(), '.dsh'), 'mcp', 'dsh-mcp-endpoint.json')
 const { url, token } = JSON.parse(readFileSync(endpointFile, 'utf8'))
 assert.ok(url && token, `endpoint file ${endpointFile} must carry url and token`)
 
-const EXPECTED_TOOLS = [
-  'dsh_run_prompt',
-  'dsh_continue_session',
-  'dsh_ask_session',
-  'dsh_answer_question',
-  'dsh_get_question',
-  'dsh_list_commands',
-  'dsh_run_command',
-  'dsh_list_sessions',
-  'dsh_read_session',
-  'dsh_search_sessions',
-  'dsh_list_requests',
-  'dsh_answer_request',
-  'dsh_wait_session',
-  'dsh_whoami',
-  'dsh_cancel_session',
-  'dsh_archive_session',
-  'dsh_unarchive_session',
-  'dsh_list_permission_presets',
-  'dsh_list_tools',
-  'dsh_status',
-  'dsh_open_session',
-]
+/** The published table itself, so a new tool cannot leave this suite behind. */
+const EXPECTED_TOOLS = TOOL_DEFINITIONS.map((tool) => tool.name)
 
 async function post(message, { auth = true, token: override, timeoutMs = 300_000, headers = {} } = {}) {
   const response = await fetch(url, {
