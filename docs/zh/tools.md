@@ -28,7 +28,7 @@
 | `dsh_list_permission_presets` | 该部署的权限预设（每个预设把一种沙箱模式与一种审批策略打包在一起）以及新会话的默认值，供上面的 `permissionPreset` 参数使用。 |
 | `dsh_list_tools` | DSH 暴露给自身智能体的工具，用于挑选被委派的提示词能做什么；`query` 按名称或描述收窄，`limit` 限制列表长度。 |
 | `dsh_open_session` | 请求正在运行的 Web GUI 打开某个会话并在侧边栏中选中它——用于把人指向本端点启动的会话。命令会排入当前打开的页面队列，且只消费一次；会话本身不受影响。 |
-| `dsh_status` | 端点、配置档案、版本、会话数与活跃智能体数、默认模型、活动回合、默认权限预设、投递策略、本地工具面（`dshTools`），以及保持未决的必须回复问题（`questions`）。 |
+| `dsh_status` | 端点、配置档案、版本、会话数与活跃智能体数、默认模型、活动回合、默认权限预设、投递策略、本地工具面（`dshTools`）、配置预设（`configPreset`），以及保持未决的必须回复问题（`questions`）。 |
 
 归档需要 宿主的 `workspaceRegistry` 服务（`@deepseek-ai/dsh-workspace`）。缺少该服务时，两个归档工具会报告服务不可用，列表则直接省略 `archived` 字段，而不是靠猜测。
 

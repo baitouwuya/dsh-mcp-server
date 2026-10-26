@@ -42,8 +42,9 @@ other harness ──MCP (Streamable HTTP or stdio)──> DSH MCP Server ──>
   registers all twenty-one. Internal calls stay inside the caller's sandbox and workspace.
 - **Point the person at the work.** Sessions this endpoint starts join the sidebar project their directory
   already has, and `dsh_open_session` asks the open Web GUI to select one.
-- **Configure it from the Plugins page.** On/off, lazy vs. full surface, sidebar grouping, busy delivery and
-  progress sync are switches on the bundle's own page, saved through the profile editor.
+- **Configure it from the Plugins page, or by preset.** On/off, lazy vs. full surface, sidebar grouping,
+  busy delivery and progress sync are switches on the bundle's own page, saved through the profile editor;
+  a deployment can also write `preset: delegate | strict | observer` in the row, which fills only the fields it leaves unset.
 
 ## Quick start
 
@@ -103,8 +104,8 @@ The [docs index](docs/README.md) lists both languages.
 
 ## Status
 
-Version **0.20.5**, checked against **DSH 0.2.1-rc.3** (Cordis 4.0.5): 21 MCP tools, 2 resources, 1 resource
-template, 242 offline checks plus live HTTP and stdio suites. Host-only, zero dependencies, MIT.
+Version **0.21.0**, checked against **DSH 0.2.1-rc.3** (Cordis 4.0.5): 21 MCP tools, 2 resources, 1 resource
+template, 247 offline checks plus live HTTP and stdio suites. Host-only, zero dependencies, MIT.
 The plugin imports no DSH package, so compatibility is a question of service contracts rather than a version
 pin — see [Internals](docs/en/internals.md#dsh-compatibility). Per-version changes are in [CHANGELOG.md](CHANGELOG.md).
 

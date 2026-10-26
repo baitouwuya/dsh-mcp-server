@@ -62,7 +62,7 @@ node test/integration/sessions-and-identity.mjs    # 17 checks: waiting, whoami,
 node test/integration/archive-permissions-commands.mjs # 24 checks: archive, permissions, models, commands
 node test/integration/transcripts.mjs              # 11 checks: outline/tail/paging, index, search, budget
 node test/integration/decisions.mjs                # 18 checks: parked approvals/questions, must-reply, busyMode
-node test/integration/config-and-grouping.mjs      # 27 checks: config route, grouping, delivery, hot reload
+node test/integration/config-and-grouping.mjs      # 32 checks: config route, presets, grouping, delivery, hot reload
 node test/mcp-conformance-test.mjs                 # 26 checks: protocol versions, methods, errors, auth
 node test/client-half-test.mjs         # 18 checks: the browser half's bundle page, its row page, its route
 node test/stdio-bridge-test.mjs        # 4 checks, needs a RUNNING Harness (one real delegated turn)

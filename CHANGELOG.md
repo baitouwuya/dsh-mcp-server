@@ -3,7 +3,18 @@
 Notable changes to `@local/dsh-mcp-server`. Older releases are listed on
 [GitHub Releases](https://github.com/baitouwuya/dsh-mcp-server/releases).
 
-## Unreleased
+## [0.21.0] - 2026-10-26
+
+### Added
+
+- Configuration presets: `preset: delegate | strict | observer` fills only the
+  fields the row leaves unset, and an explicit field always wins. `delegate` is
+  the default; `strict` isolates callers (`restrictToOwner`, queued busy prompts)
+  and stays out of the answerer race; `observer` keeps the endpoint MCP-only,
+  out of the sidebar, and answer-free. The `/mcp-config` route accepts the patch,
+  and `dsh_status` reports `configPreset`.
+- Five integration checks cover preset resolution, explicit overrides, the load
+  error for an unknown name, and the configuration-route patch (247 offline checks).
 
 ### Fixed
 

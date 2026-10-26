@@ -28,7 +28,7 @@ Twenty-one MCP tools, two resources and one resource template — each shaped so
 | `dsh_list_permission_presets` | The deployment's permission presets (each bundles a sandbox mode with an approval policy) plus the default for new sessions, for the `permissionPreset` argument above. |
 | `dsh_list_tools` | The tools DSH exposes to its own agents, for choosing what a delegated prompt can do; `query` narrows by name or description and `limit` caps the list. |
 | `dsh_open_session` | Ask the running Web GUI to open one session and select it in the sidebar — for pointing the person at a session this endpoint started. Queued for the page that is open and consumed once; the session itself is untouched. |
-| `dsh_status` | Endpoint, profile, version, session/live-agent counts, default model, active turns, the default permission preset, the delivery policy, the local tool surface (`dshTools`), and the must-reply questions held open (`questions`). |
+| `dsh_status` | Endpoint, profile, version, session/live-agent counts, default model, active turns, the default permission preset, the delivery policy, the local tool surface (`dshTools`), the configuration preset (`configPreset`), and the must-reply questions held open (`questions`). |
 
 Archival needs the Host's `workspaceRegistry` service (`@deepseek-ai/dsh-workspace`). Without it the
 two archive tools report that the service is unavailable and listings simply omit the `archived`

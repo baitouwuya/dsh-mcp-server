@@ -18,6 +18,7 @@ import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 
 import { createDshCapabilities, DEFAULT_MAX_CONCURRENT_TURNS, DEFAULT_TURN_TIMEOUT_MS, INSTRUCTIONS } from './lib/dsh-capabilities.js'
+import { resolveConfigPreset } from './lib/config-presets.js'
 import { createClientRegistry, DEFAULT_CLIENT_FLUSH_MS, resolveCaller } from './lib/clients.js'
 import { createConfigHandler } from './lib/config-route.js'
 import { createMcpHttpHandler } from './lib/http-route.js'
@@ -29,7 +30,7 @@ import { groupOwnedSessions } from './lib/workspace-grouping.js'
 import { errorText, sessionIdOf } from './lib/dsh-contracts.js'
 
 /** Keep in sync with package.json; reported through `initialize`. */
-const VERSION = '0.20.5'
+const VERSION = '0.21.0'
 
 /** This package's own name, as the profile's bundle row spells it. */
 const PACKAGE_NAME = (() => {
@@ -95,6 +96,9 @@ function tokensMatch(presented, expected) {
  * @param config - row configuration from `cordis.patch.yml`; every field is optional.
  */
 export function apply(ctx, config = {}) {
+  // A named preset fills the fields the row leaves unset; explicit fields win.
+  config = resolveConfigPreset(config)
+  const configPreset = config.preset
   const logger = ctx.logger?.('dsh-mcp-server') ?? { info() {}, warn() {}, debug() {}, error() {} }
   const log = (level, message, detail) => {
     const sink = typeof logger[level] === 'function' ? logger[level].bind(logger) : logger.info?.bind(logger)
@@ -437,6 +441,7 @@ export function apply(ctx, config = {}) {
     groupSessions,
     createGroups,
     busyMode,
+    configPreset,
     openSession: queueOpenSession,
     syncStatus: () => workSyncStatus(),
     questions,
@@ -578,6 +583,9 @@ export function apply(ctx, config = {}) {
       registered: dshToolsState.names,
       groupSessions,
       createGroups,
+      preset: configPreset,
+      restrictToOwner,
+      answerUserRequests,
       busyMode,
       syncOnStart: syncOnStartValue(),
       syncRowId: syncEntryId,
@@ -884,6 +892,7 @@ export function apply(ctx, config = {}) {
     path,
     auth: configuredToken ? 'configured bearer token' : 'generated bearer token',
     tools: capabilities.tools.length,
+    preset: configPreset,
     exposeToDsh,
     exposeToDshMode,
     groupSessions,

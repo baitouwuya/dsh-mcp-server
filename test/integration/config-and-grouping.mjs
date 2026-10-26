@@ -448,6 +448,56 @@ try {
     assert.equal(bound.instanceId, boundLater.instanceId)
   })
 
+
+  // --- configuration presets ---------------------------------------------------
+  // A preset fills only the fields the row leaves unset; an explicit value wins.
+  const presetHarness = async (label, applyOptions) => {
+    const harness = await createPluginHarness({ label, applyOptions })
+    try {
+      const config = await (await fetch(harness.configUrl)).json()
+      const status = await harness.call('dsh_status')
+      return { config, status }
+    } finally {
+      await harness.close()
+    }
+  }
+  const strictPreset = await presetHarness('preset-strict', { preset: 'strict' })
+  const observerPreset = await presetHarness('preset-observer', { preset: 'observer' })
+  const overridePreset = await presetHarness('preset-override', { preset: 'observer', exposeToDsh: true })
+  const badPreset = await createPluginHarness({ label: 'preset-bad', applyOptions: { preset: 'sometimes' } })
+    .then(() => undefined, (error) => error)
+  await check('the strict preset isolates callers and queues busy deliveries', () => {
+    assert.equal(strictPreset.config.preset, 'strict')
+    assert.equal(strictPreset.config.restrictToOwner, true)
+    assert.equal(strictPreset.config.answerUserRequests, false)
+    assert.equal(strictPreset.config.busyMode, 'queue')
+    assert.equal(strictPreset.status.configPreset, 'strict')
+    assert.equal(strictPreset.status.grouping.attach, true, 'grouping is not narrowed by strict')
+  })
+  await check('the observer preset keeps the endpoint MCP-only and out of the sidebar', () => {
+    assert.equal(observerPreset.config.preset, 'observer')
+    assert.equal(observerPreset.config.exposeToDsh, false)
+    assert.equal(observerPreset.config.groupSessions, false)
+    assert.equal(observerPreset.config.restrictToOwner, true)
+    assert.equal(observerPreset.status.dshTools.enabled, false)
+  })
+  await check('an explicit row field overrides its preset value', () => {
+    assert.equal(overridePreset.config.preset, 'observer')
+    assert.equal(overridePreset.config.exposeToDsh, true)
+    assert.equal(overridePreset.status.dshTools.enabled, true)
+  })
+  await check('an unknown preset fails at load and names the accepted ones', () => {
+    assert.match(String(badPreset?.message), /"preset" must be one of delegate, strict, observer/)
+  })
+  const presetWrite = await (await fetch(configUrl, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ preset: 'strict' }),
+  })).json()
+  await check('the configuration route accepts a preset patch', () => {
+    assert.equal(presetWrite.ok, true)
+    assert.equal(configEdits().at(-1).next.preset, 'strict')
+  })
   h.finish()
 } finally {
   await h.close()

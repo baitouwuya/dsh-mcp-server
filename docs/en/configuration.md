@@ -36,10 +36,13 @@ rejected, and an oversized body gets a `413` rather than a reset socket. A local
 
 ## Bundle row fields
 
-The bundle row in `cordis.patch.yml` accepts (all optional):
+The bundle row in `cordis.patch.yml` accepts (all optional). `preset` fills only the fields the row
+leaves unset; an explicit field always wins:
+
 
 | Field | Default | Meaning |
 |---|---|---|
+| `preset` | `delegate` | Named defaults: `delegate` (full delegation), `strict` (each caller sees only its own sessions; busy prompts queue), `observer` (no local tool surface, no sidebar changes, no decision answering). |
 | `path` | `/mcp` | Route path on the Harness web server. |
 | `token` | generated | Fixed bearer token; set this so external configs stay stable across restarts. |
 | `url` | `$DSH_WEB_URL` or `http://127.0.0.1:19387` | Advertised base URL written to the endpoint file. |
