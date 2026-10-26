@@ -21,6 +21,9 @@ assert.ok(url && token, `endpoint file ${endpointFile} must carry url and token`
 const EXPECTED_TOOLS = [
   'dsh_run_prompt',
   'dsh_continue_session',
+  'dsh_ask_session',
+  'dsh_answer_question',
+  'dsh_get_question',
   'dsh_list_commands',
   'dsh_run_command',
   'dsh_list_sessions',
@@ -84,7 +87,7 @@ oh('initialize negotiates 2025-06-18 with tools + resources capabilities')
 
 const listed = (await rpc('tools/list', {})).body.result.tools.map((tool) => tool.name)
 assert.deepEqual([...listed].sort(), [...EXPECTED_TOOLS].sort())
-oh('tools/list exposes exactly the twelve documented tools')
+oh('tools/list exposes exactly the twenty-one documented tools')
 
 const resources = (await rpc('resources/list', {})).body.result.resources.map((resource) => resource.uri)
 assert.deepEqual([...resources].sort(), ['dsh://sessions', 'dsh://status'])
@@ -143,8 +146,12 @@ oh('dsh_status reports the on-demand surface, its size, and its front door')
 
 // The sessions this endpoint starts must join their directory's project: the
 // sidebar groups by recorded membership, so nothing else can group them.
-assert.equal(status.busyMode?.configured, 'setting')
-assert.ok(status.busyMode?.effective === 'steer' || status.busyMode?.effective === 'queue')
+assert.ok(['setting', 'queue', 'steer'].includes(status.busyMode?.configured))
+if (status.busyMode?.configured === 'setting') {
+  assert.ok(status.busyMode?.effective === 'steer' || status.busyMode?.effective === 'queue')
+} else {
+  assert.equal(status.busyMode?.effective, status.busyMode?.configured)
+}
 oh('dsh_status reports the delivery policy this deployment follows')
 
 const configUrl = `${url.replace(/\/mcp$/, '')}/mcp-config`
