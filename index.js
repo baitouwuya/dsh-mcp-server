@@ -29,7 +29,7 @@ import { groupOwnedSessions } from './lib/workspace-grouping.js'
 import { errorText, sessionIdOf } from './lib/dsh-contracts.js'
 
 /** Keep in sync with package.json; reported through `initialize`. */
-const VERSION = '0.20.3'
+const VERSION = '0.20.5'
 
 /** This package's own name, as the profile's bundle row spells it. */
 const PACKAGE_NAME = (() => {

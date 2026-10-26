@@ -88,6 +88,7 @@ DSH：创建会话、推进回合、等待结果、读取对话记录、取消�
 |---|---|
 | [快速开始](docs/zh/getting-started.md) | 安装、端点文件与令牌、HTTP/stdio/DSH 作为客户端的配置、自检 bundle。 |
 | [工具与资源](docs/zh/tools.md) | 全部 21 个工具、3 个资源、渐进式读取、待决的用户决策。 |
+| [协议支持](docs/zh/protocol.md) | 支持的 MCP 版本、方法、能力声明、通知、错误码、鉴权、会话头，以及明确不支持的项。 |
 | [会话与投递](docs/zh/sessions.md) | 调用方身份与归属、等待、侧边栏分组、排队/插话、在 GUI 中打开会话。 |
 | [DSH 本地工具](docs/zh/dsh-local.md) | Harness 内部工具面、lazy 前门、权限上限。 |
 | [必须回复的问题](docs/zh/questions.md) | `dsh_ask_session` / `dsh_answer_question` / `dsh_get_question`、提醒、人为停止、死锁。 |
@@ -99,8 +100,8 @@ DSH：创建会话、推进回合、等待结果、读取对话记录、取消�
 
 ## 状态
 
-版本 **0.20.4**，已针对 **DSH 0.2.1-rc.3**（Cordis 4.0.5）验证：21 个 MCP 工具、2 个资源、
-1 个资源模板、216 项离线检查，外加在线 HTTP 与 stdio 套件。仅宿主侧、零依赖、MIT。
+版本 **0.20.5**，已针对 **DSH 0.2.1-rc.3**（Cordis 4.0.5）验证：21 个 MCP 工具、2 个资源、
+1 个资源模板、242 项离线检查，外加在线 HTTP 与 stdio 套件。仅宿主侧、零依赖、MIT。
 插件不 import 任何 DSH 包，所以兼容性取决于服务契约而不是版本锁定——见
 [内部实现](docs/zh/internals.md#dsh-兼容性)。
 

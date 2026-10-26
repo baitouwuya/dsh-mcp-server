@@ -91,6 +91,7 @@ other harness ──MCP (Streamable HTTP or stdio)──> DSH MCP Server ──>
 |---|---|
 | [Getting started](docs/en/getting-started.md) | Install, endpoint file and token, HTTP/stdio/DSH-as-client configs, the self-check bundle. |
 | [Tools and resources](docs/en/tools.md) | All 21 tools, the three resources, progressive reads, pending decisions. |
+| [Protocol support](docs/en/protocol.md) | Supported MCP revisions, methods, capabilities, notifications, error codes, authentication, session headers, and unsupported features. |
 | [Sessions and delivery](docs/en/sessions.md) | Caller identity and ownership, waiting, sidebar grouping, queue/steer, GUI open. |
 | [DSH-local tools](docs/en/dsh-local.md) | The in-Harness surface, the lazy front door, and the authority ceiling. |
 | [Must-reply questions](docs/en/questions.md) | `dsh_ask_session` / `dsh_answer_question` / `dsh_get_question`, reminders, human stops, deadlocks. |
@@ -102,8 +103,8 @@ The [docs index](docs/README.md) lists both languages.
 
 ## Status
 
-Version **0.20.4**, checked against **DSH 0.2.1-rc.3** (Cordis 4.0.5): 21 MCP tools, 2 resources, 1 resource
-template, 216 offline checks plus live HTTP and stdio suites. Host-only, zero dependencies, MIT.
+Version **0.20.5**, checked against **DSH 0.2.1-rc.3** (Cordis 4.0.5): 21 MCP tools, 2 resources, 1 resource
+template, 242 offline checks plus live HTTP and stdio suites. Host-only, zero dependencies, MIT.
 The plugin imports no DSH package, so compatibility is a question of service contracts rather than a version
 pin — see [Internals](docs/en/internals.md#dsh-compatibility).
 

@@ -56,18 +56,15 @@ node test/questions-test.mjs           # 17 checks: must-reply ids, injected id-
 node test/work-sync-test.mjs           # 22 checks: the progress-sync engine against a fake Harness
 node test/work-sync-plugin-test.mjs    # 5 checks: the sync bundle row's service, messages, switch, disposal
 node test/turn-wait-test.mjs          # 2 checks: which turn a queued or steered prompt reports
+node test/integration/protocol-and-tools.mjs       # 26 checks: apply(), endpoint file, tools, status, the
+                                                   # lazy front door, its authority ceiling, lossless values
+node test/integration/sessions-and-identity.mjs    # 17 checks: waiting, whoami, ownership, restrictToOwner
+node test/integration/archive-permissions-commands.mjs # 24 checks: archive, permissions, models, commands
+node test/integration/transcripts.mjs              # 11 checks: outline/tail/paging, index, search, budget
+node test/integration/decisions.mjs                # 18 checks: parked approvals/questions, must-reply, busyMode
+node test/integration/config-and-grouping.mjs      # 27 checks: config route, grouping, delivery, hot reload
+node test/mcp-conformance-test.mjs                 # 26 checks: protocol versions, methods, errors, auth
 node test/client-half-test.mjs         # 18 checks: the browser half's bundle page, its row page, its route
-node test/plugin-integration-test.mjs  # 123 checks: apply(), endpoint file + advertised URL, tools,
-                                       # transcript windows, outline/paging/truncation, search, index
-                                       # cursors, pending user decisions (PTC included), parked approvals
-                                       # and questions answered over MCP, waiting, caller identity +
-                                       # restrictToOwner, archival tools, permissions, commands, model
-                                       # pinning, hot-reload ownership, the on-demand DSH surface (catalogue,
-                                       # open, dispatch), its authority ceiling, the configuration route,
-                                       # sidebar grouping, delivery mode, sender attribution, lossless values,
-                                       # the workspace-root clamp, restrictToOwner's owner filter, the
-                                       # configuration route's origin/content-type/413 fences, live default
-                                       # model resolution, ownership persistence, and that sync is a separate row
 node test/stdio-bridge-test.mjs        # 4 checks, needs a RUNNING Harness (one real delegated turn)
 node test/live-e2e-test.mjs            # 46 checks over HTTP: protocol, resources, all twenty-one tools,
                                        # archive/unarchive, permission presets, commands, error paths,
