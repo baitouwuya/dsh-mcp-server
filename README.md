@@ -29,7 +29,8 @@ DSH：创建会话、推进回合、等待结果、读取对话记录、取消�
 - **多个 harness 共用一个端点。** 调用方身份按请求头、`clientInfo` 或 User-Agent 解析；会话记录在
   所有者名下；`restrictToOwner` 把每个调用方限制在它自己创建的会话里。
 - **看见模型看不见的决策。** `dsh_list_requests` 报告审批请求和未回答的用户提问（含工具、原因、
-  call id）；开启 `answerUserRequests: true` 后，`dsh_answer_request` 可以和 GUI 竞速地给出决定。
+  call id）；开启 `answerApprovals` / `answerQuestions`（旧的 `answerUserRequests` 仍作总开关）后，
+  `dsh_answer_request` 可以和 GUI 竞速地给出决定。
 - **问一个目标必须回答的问题。** `dsh_ask_session` 让提问回合一直阻塞到被问会话回答；问题带编号，
   提醒只搭在目标自己的调用上（绝不唤醒会话），人为停止会直接结案且不打扰任何人。
 - **避免同工作区的 agent 撞车。** 任务开始时进度同步会询问同一工作区里的其他顶层 agent 正在做什么、
@@ -101,8 +102,8 @@ DSH：创建会话、推进回合、等待结果、读取对话记录、取消�
 
 ## 状态
 
-版本 **0.21.0**，已针对 **DSH 0.2.1-rc.3**（Cordis 4.0.5）验证：21 个 MCP 工具、2 个资源、
-1 个资源模板、247 项离线检查，外加在线 HTTP 与 stdio 套件。仅宿主侧、零依赖、MIT。
+版本 **0.22.0**，已针对 **DSH 0.2.1-rc.3**（Cordis 4.0.5）验证：21 个 MCP 工具、2 个资源、
+1 个资源模板、249 项离线检查，外加在线 HTTP 与 stdio 套件。仅宿主侧、零依赖、MIT。
 插件不 import 任何 DSH 包，所以兼容性取决于服务契约而不是版本锁定——见
 [内部实现](docs/zh/internals.md#dsh-兼容性)。逐版本变更见 [CHANGELOG.md](CHANGELOG.md)。
 

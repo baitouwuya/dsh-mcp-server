@@ -3,6 +3,20 @@
 Notable changes to `@local/dsh-mcp-server`. Older releases are listed on
 [GitHub Releases](https://github.com/baitouwuya/dsh-mcp-server/releases).
 
+## [0.22.0] - 2026-10-27
+
+### Added
+
+- `answerApprovals` and `answerQuestions` split the old `answerUserRequests`
+  umbrella: a question is a normal decision, while an approval grants a sandbox
+  escalation, so a deployment can now enable either one. The umbrella still sets
+  both defaults and an explicit per-kind value wins.
+- The Plugins page panel offers a switch for each kind, `dsh_status.answering`
+  reports the effective pair (and `answerOwnedSessionsOnly`), and `/mcp-config`
+  accepts both fields.
+- Two integration checks cover hook registration and the route patch; the client
+  half renders and operates both switches (249 offline checks).
+
 ## [0.21.0] - 2026-10-26
 
 ### Added

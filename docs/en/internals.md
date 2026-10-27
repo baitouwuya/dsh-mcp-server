@@ -58,7 +58,7 @@ What a calling model sees, and why it was shaped that way:
 - **`initialize` instructions are the map, not a tool dump.** They say which tool starts a session and which
   continues one, when to use `wait: false` + `dsh_wait_session` (waiting never cancels), that reads are windows
   (`mode`/`maxChars`/`afterSeq`) rather than dumps, and that approvals and questions are reported per session
-  and answerable only when the deployment enables `answerUserRequests`.
+  and answerable only when the deployment enables `answerApprovals`/`answerQuestions` (or the legacy `answerUserRequests`).
 - **Descriptions carry what a schema cannot.** `dsh_run_command(sessionId, line|command)` says its two shapes in
   the signature because a model that follows a wrong one is worse off than a model given none.
 - **Failures are typed.** An unknown tool or a malformed resource id is `-32602 invalidParams`; a normal tool
@@ -86,7 +86,7 @@ node test/integration/protocol-and-tools.mjs       # 26 checks: apply(), endpoin
 node test/integration/sessions-and-identity.mjs    # 17 checks: waiting, whoami, ownership, restrictToOwner
 node test/integration/archive-permissions-commands.mjs # 24 checks: archive, permissions, models, commands
 node test/integration/transcripts.mjs              # 11 checks: outline/tail/paging, index, search, budget
-node test/integration/decisions.mjs                # 18 checks: parked approvals/questions, must-reply, busyMode
+node test/integration/decisions.mjs                # 20 checks: parked approvals/questions, per-kind answering, must-reply, busyMode
 node test/integration/config-and-grouping.mjs      # 32 checks: config route, presets, grouping, delivery, hot reload
 node test/mcp-conformance-test.mjs                 # 26 checks: protocol versions, methods, errors, auth
 node test/client-half-test.mjs         # 18 checks: the browser half's bundle page, its row page, its route

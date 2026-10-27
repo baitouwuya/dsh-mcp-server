@@ -16,6 +16,8 @@
 | 暴露面：按需 / 一次全给 | `exposeToDshMode` |
 | 侧边栏项目：加入 / 可创建 | `groupSessions`、`createGroups` |
 | 忙碌时的投递：跟随设置 / 排队 / 插话 | `busyMode`（以及该设置当前解析出的值） |
+| 代答审批：开 / 关 | `answerApprovals` |
+| 回答提问：开 / 关 | `answerQuestions` |
 | 任务启动进度同步：开 / 关 | `dsh-work-sync` 行上的 `syncOnStart` |
 
 每个控件都通过配置档案的配置编辑器保存，并重载本插件的行，与手工编辑完全一致。面板沿用 Harness
@@ -48,7 +50,9 @@
 | `defaultModel` | Harness 默认模型 | **新启动**且未显式指定 `model` 的会话所用的 `{ provider, model, reasoningEffort? }`。继续的会话保持它已在运行的模型。 |
 | `turnTimeoutMs` | `1800000` | 等待回合的工具调用的默认等待上限。到达它只会停止等待，绝不会停止回合。 |
 | `maxConcurrentTurns` | `8` | 新调用进入排队前的并发等待回合数。`dsh_wait_session` 不启动回合，也不占名额。 |
-| `answerUserRequests` | `false` | 成为部署的应答方之一：把本端点驱动的会话的审批和问题挂起，以便调用方用 `dsh_answer_request` 处理，并与 GUI 竞争（先决定者胜）。 |
+| `answerUserRequests` | `false` | 旧的总结开关：设置后作为 `answerApprovals` 与 `answerQuestions` 的默认值；显式的分项值优先。 |
+| `answerApprovals` | 跟随 `answerUserRequests` | 成为**审批**的应答方之一，可用 `dsh_answer_request({ decision })` 结算一次性授权/拒绝；GUI 卡片仍在竞争中。内部调用者只有在已持有 `danger-full-access` 时才能代答审批。 |
+| `answerQuestions` | 跟随 `answerUserRequests` | 成为**用户提问**（`ask_user_question`）的应答方之一，可用 `dsh_answer_request({ answers })` 作答。提问不涉及提权，内部调用者始终可答。 |
 | `answerOwnedSessionsOnly` | `true` | 开启应答后，只有 MCP 调用方创建或接管的会话会被挂起；其他卡片仍由 GUI 处理。 |
 | `requestAnswerTimeoutMs` | `600000` | 挂起的请求在失败关闭之前等待 MCP 回答多久。 |
 | `restrictToOwner` | `false` | 把每个调用方限制在它创建或接管的会话内：其他会话按 id 被拒绝，`dsh_list_sessions` 只返回它自己的会话。 |

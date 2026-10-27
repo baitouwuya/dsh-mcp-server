@@ -17,7 +17,7 @@
 | `dsh_run_command` | 在某个会话中运行一条斜杠命令，并返回其落定后的 `{ kind, text, commandId }`。`line` 接收完整的命令行（`"/compact"`、`"/permission danger-full-access"`）；`command`（加上可选的 `args`）接收裸名称。命令立即执行，不经过模型回合。 |
 | `dsh_list_sessions` | 会话索引的一页：`sessionId`、标题、运行状态、归档状态、活动时间，以及记录在案的所有者智能体（`view: "full"` 会加上 cwd 和存活状态）。在服务端用 `query`（标题/cwd/所有者/id）、`mine: true`（或 `restrictToOwner` 设置）、`owner: "<id>"`（仅用于收窄：在受限端点上指定其他所有者会被拒绝）和 `running` 收窄结果；用 `cursor`/`nextCursor` 翻页。除非 `includeArchived: true`，归档会话会被隐藏，与 Web UI 保持一致。 |
 | `dsh_read_session` | 某个会话对话记录的一个窗口（仅包含用户撰写和助手消息），外加最后一次持久化的 `permissionPreset`。`mode: "tail"`（默认，最后 10 条）/ `"head"` / `"outline"`（每条消息一行紧凑记录，含预览和长度，不含全文）；用 `roles`、`afterSeq` + `window.nextAfterSeq` 翻页，用 `maxChars`（默认 2000）限制单次回答的长度。会报告 `totalMessages`、`matchedMessages` 和 `returned`，因此调用方始终知道自己还有哪些没读到。`limit: 0` 请求最大的窗口（上限 1000 条消息），单次响应上限约 512K 字符（`truncatedByBudget`），所以一次读取永远不会倾倒整个长会话。会话处于归档状态时仍然可用。 |
-| `dsh_answer_request` | 回答一个被挂起的决策，仅在部署设置了 `answerUserRequests: true` 时可用：审批用 `decision: "allow"|"deny"`（一次性授权，或拒绝），问题用 `answers: [{ id, selected }]`。id 来自 `dsh_list_requests`，该工具会把本端点挂起的请求标记为 `answerable: true`。GUI 仍在竞争中——谁先决定谁生效——未回答的请求仍会在 `requestAnswerTimeoutMs` 处按失败关闭（fail closed）。DSH 内部调用方只有在已持有 `danger-full-access` 时才能处理**审批**；问题则始终可以回答（见 [DSH 本地工具](dsh-local.md)）。 |
+| `dsh_answer_request` | 回答一个被挂起的决策，仅在部署启用了 `answerApprovals`/`answerQuestions`（或旧的 `answerUserRequests`）时可用：审批用 `decision: "allow"|"deny"`（一次性授权，或拒绝），问题用 `answers: [{ id, selected }]`。id 来自 `dsh_list_requests`，该工具会把本端点挂起的请求标记为 `answerable: true`。GUI 仍在竞争中——谁先决定谁生效——未回答的请求仍会在 `requestAnswerTimeoutMs` 处按失败关闭（fail closed）。DSH 内部调用方只有在已持有 `danger-full-access` 时才能处理**审批**；问题则始终可以回答（见 [DSH 本地工具](dsh-local.md)）。 |
 | `dsh_wait_session` | 阻塞直到某个会话已在运行的回合结束，然后返回该回合产生的助手文本——适用于 `wait: false` 启动、GUI 驱动的会话，或另一位调用方的工作。它从不发送提示词、从不插话、也从不取消：到达 `timeoutMs` 时返回 `status: "timedOut"`，此时回合仍在运行，因此需要再次调用；没有回合运行时，`status: "idle"` 会立即返回。 |
 | `dsh_list_requests` | 某个会话（或最新的可见会话，运行中的优先）正在等待的用户决策：审批请求（`approval/asked` 没有匹配的 `approval/decided`，也就是沙箱提权背后的一次性权限决策）和未回答的 `ask_user_question` 调用，附带工具、原因、调用 id 和 seq。这些审计事件对模型不可见，因此调用方正是借此得知被委派的回合*为什么*停止推进。仅用于报告：决策在 Harness GUI 中授予。 |
 | `dsh_search_sessions` | 在服务端按内容查找会话，得到有界片段而不是整份对话记录：匹配标题/cwd/所有者/id（`scope: "title"`），或匹配消息本身（`"messages"`，默认 `"both"`）。只查看调用方可见的最新 `scan` 个会话（默认 20 个），为每个匹配报告 `where`/`seq`/`snippet`，随后可用 `dsh_read_session` 只读取那个会话。 |
@@ -28,7 +28,7 @@
 | `dsh_list_permission_presets` | 该部署的权限预设（每个预设把一种沙箱模式与一种审批策略打包在一起）以及新会话的默认值，供上面的 `permissionPreset` 参数使用。 |
 | `dsh_list_tools` | DSH 暴露给自身智能体的工具，用于挑选被委派的提示词能做什么；`query` 按名称或描述收窄，`limit` 限制列表长度。 |
 | `dsh_open_session` | 请求正在运行的 Web GUI 打开某个会话并在侧边栏中选中它——用于把人指向本端点启动的会话。命令会排入当前打开的页面队列，且只消费一次；会话本身不受影响。 |
-| `dsh_status` | 端点、配置档案、版本、会话数与活跃智能体数、默认模型、活动回合、默认权限预设、投递策略、本地工具面（`dshTools`）、配置预设（`configPreset`），以及保持未决的必须回复问题（`questions`）。 |
+| `dsh_status` | 端点、配置档案、版本、会话数与活跃智能体数、默认模型、活动回合、默认权限预设、投递策略、本地工具面（`dshTools`）、配置预设（`configPreset`）、代答开关（`answering`），以及保持未决的必须回复问题（`questions`）。 |
 
 归档需要 宿主的 `workspaceRegistry` 服务（`@deepseek-ai/dsh-workspace`）。缺少该服务时，两个归档工具会报告服务不可用，列表则直接省略 `archived` 字段，而不是靠猜测。
 
@@ -58,7 +58,7 @@
 
 PTC 智能体为自己派发的问题（在 `run_code` 内部）由其派发开始事件整理而来，那是工具阻塞回合期间唯一持久的痕迹，并在该派发落定后关闭。读取和等待会以紧凑的 `pending` 摘要暴露同一状态，因此 `timedOut` 的等待不再让调用方只能猜测。
 
-默认情况下这只是**报告**——决策在 Harness GUI 中授予。设置 `answerUserRequests: true` 后，端点成为组合回答者之一：它挂起请求并与其他所有回答者竞争，因此 GUI 卡片仍然有效，谁先决定谁生效（GUI，或 `dsh_answer_request`）。除非 `answerOwnedSessionsOnly: false`，否则只挂起 MCP 调用方创建或接管的会话；未回答的请求会在 `requestAnswerTimeoutMs` 处按失败关闭。两半都是 Cordis 瀑布监听器（`approval/request`、`user-questions/request`），而作用域过滤器会接纳未限定作用域的监听器，宿主插件正是以此接收智能体作用域的请求。
+默认情况下这只是**报告**——决策在 Harness GUI 中授予。启用 `answerApprovals`/`answerQuestions`（或旧的 `answerUserRequests`）后，端点成为组合回答者之一：它挂起请求并与其他所有回答者竞争，因此 GUI 卡片仍然有效，谁先决定谁生效（GUI，或 `dsh_answer_request`）。除非 `answerOwnedSessionsOnly: false`，否则只挂起 MCP 调用方创建或接管的会话；未回答的请求会在 `requestAnswerTimeoutMs` 处按失败关闭。两半都是 Cordis 瀑布监听器（`approval/request`、`user-questions/request`），而作用域过滤器会接纳未限定作用域的监听器，宿主插件正是以此接收智能体作用域的请求。
 
 ## 资源
 

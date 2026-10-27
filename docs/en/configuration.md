@@ -17,6 +17,8 @@ reaches the same switches. It carries every switch this plugin has, so none of t
 | Surface: on demand / all at once | `exposeToDshMode` |
 | Sidebar projects: join / may create | `groupSessions`, `createGroups` |
 | Delivery while busy: follow the setting / queue / steer | `busyMode` (with the value the setting currently resolves to) |
+| Answer approvals: on / off | `answerApprovals` |
+| Answer user questions: on / off | `answerQuestions` |
 | Task-start progress sync: on / off | `syncOnStart` on the `dsh-work-sync` row |
 
 Each control saves through the profile configuration editor and reloads this plugin's row, exactly as a
@@ -53,7 +55,9 @@ leaves unset; an explicit field always wins:
 | `defaultModel` | Harness default model | `{ provider, model, reasoningEffort? }` for **newly started** sessions without an explicit `model`. A continued session keeps the model it already runs. |
 | `turnTimeoutMs` | `1800000` | Default wait ceiling for a tool call that waits for a turn. Reaching it stops the wait, never the turn. |
 | `maxConcurrentTurns` | `8` | Concurrent waited turns before new calls queue. `dsh_wait_session` starts no turn and takes no slot. |
-| `answerUserRequests` | `false` | Become one of the deployment's answerers: park approvals and questions for sessions this endpoint drives so a caller can settle them with `dsh_answer_request`, racing the GUI (whoever decides first wins). |
+| `answerUserRequests` | `false` | Legacy umbrella: when set, it becomes the default for both `answerApprovals` and `answerQuestions`; explicit per-kind values win. |
+| `answerApprovals` | follows `answerUserRequests` | Become one of the answerers for **approvals**, so `dsh_answer_request({ decision })` can settle the one-shot permission decision; the GUI card stays in the race. An internal caller may only settle one while it already holds `danger-full-access`. |
+| `answerQuestions` | follows `answerUserRequests` | Become one of the answerers for **user questions** (`ask_user_question`), so `dsh_answer_request({ answers })` can answer them. Questions carry no privilege, so an internal caller may always answer. |
 | `answerOwnedSessionsOnly` | `true` | With answering on, only sessions an MCP caller created or adopted are parked; the GUI keeps every other card. |
 | `requestAnswerTimeoutMs` | `600000` | How long a parked request waits for an MCP answer before it fails closed. |
 | `restrictToOwner` | `false` | Confine each caller to the sessions it created or adopted: other sessions are refused by id, and `dsh_list_sessions` returns only its own. |

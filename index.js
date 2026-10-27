@@ -30,7 +30,7 @@ import { groupOwnedSessions } from './lib/workspace-grouping.js'
 import { errorText, sessionIdOf } from './lib/dsh-contracts.js'
 
 /** Keep in sync with package.json; reported through `initialize`. */
-const VERSION = '0.21.0'
+const VERSION = '0.22.0'
 
 /** This package's own name, as the profile's bundle row spells it. */
 const PACKAGE_NAME = (() => {
@@ -121,9 +121,12 @@ export function apply(ctx, config = {}) {
   // Attribution is always on; `restrictToOwner` is the opt-in gate that turns it
   // into isolation between callers that share this endpoint's token.
   const restrictToOwner = config.restrictToOwner === true
-  // Answering a request is a permission decision, so this stays off unless the
-  // profile asks for it: with it on, the endpoint becomes one of the answerers.
+  // Answering is two separate permissions: a user question is a normal
+  // decision, while an approval grants a sandbox escalation. The umbrella
+  // switch keeps the old behaviour; the per-kind switches override it.
   const answerUserRequests = config.answerUserRequests === true
+  const answerApprovals = typeof config.answerApprovals === 'boolean' ? config.answerApprovals : answerUserRequests
+  const answerQuestions = typeof config.answerQuestions === 'boolean' ? config.answerQuestions : answerUserRequests
   const answerOwnedSessionsOnly = config.answerOwnedSessionsOnly !== false
   const requestAnswerTimeoutMs = Number.isFinite(Number(config.requestAnswerTimeoutMs))
     ? Math.max(1000, Number(config.requestAnswerTimeoutMs))
@@ -426,6 +429,8 @@ export function apply(ctx, config = {}) {
     sessionOwners: clients,
     restrictToOwner,
     answerUserRequests,
+    answerApprovals,
+    answerQuestions,
     answerOwnedSessionsOnly,
     ...(requestAnswerTimeoutMs === undefined ? {} : { requestAnswerTimeoutMs }),
     defaultModel: resolveDefaultModel,
@@ -586,6 +591,8 @@ export function apply(ctx, config = {}) {
       preset: configPreset,
       restrictToOwner,
       answerUserRequests,
+      answerApprovals,
+      answerQuestions,
       busyMode,
       syncOnStart: syncOnStartValue(),
       syncRowId: syncEntryId,
@@ -904,6 +911,8 @@ export function apply(ctx, config = {}) {
     clients: clientsFile,
     restrictToOwner,
     answerUserRequests,
+    answerApprovals,
+    answerQuestions,
     instance: instanceId,
   })
 }

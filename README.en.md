@@ -30,8 +30,8 @@ other harness ──MCP (Streamable HTTP or stdio)──> DSH MCP Server ──>
 - **Share one endpoint between harnesses.** Caller identity is resolved from a header, `clientInfo` or
   User-Agent; sessions are recorded against their owner; `restrictToOwner` confines each caller to its own.
 - **See the decisions the model never sees.** `dsh_list_requests` reports approvals and unanswered user
-  questions with tool, reason and call id; with `answerUserRequests: true`, `dsh_answer_request` settles
-  them racing the GUI.
+  questions with tool, reason and call id; with `answerApprovals` / `answerQuestions` (or the legacy
+  `answerUserRequests`), `dsh_answer_request` settles them racing the GUI.
 - **Ask a question the target must answer.** `dsh_ask_session` blocks the asking turn until the addressed
   session answers; the question gets an id, reminders ride the target's own calls (never a wake-up), and a
   human stop settles it without waking anyone.
@@ -104,8 +104,8 @@ The [docs index](docs/README.md) lists both languages.
 
 ## Status
 
-Version **0.21.0**, checked against **DSH 0.2.1-rc.3** (Cordis 4.0.5): 21 MCP tools, 2 resources, 1 resource
-template, 247 offline checks plus live HTTP and stdio suites. Host-only, zero dependencies, MIT.
+Version **0.22.0**, checked against **DSH 0.2.1-rc.3** (Cordis 4.0.5): 21 MCP tools, 2 resources, 1 resource
+template, 249 offline checks plus live HTTP and stdio suites. Host-only, zero dependencies, MIT.
 The plugin imports no DSH package, so compatibility is a question of service contracts rather than a version
 pin — see [Internals](docs/en/internals.md#dsh-compatibility). Per-version changes are in [CHANGELOG.md](CHANGELOG.md).
 

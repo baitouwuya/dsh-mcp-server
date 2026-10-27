@@ -39,7 +39,7 @@
 
 调用模型看到的内容，以及为什么这样设计：
 
-- **`initialize` 指令是地图，而不是工具清单的倾倒。** 它说明哪个工具用于启动会话、哪个用于继续会话，何时使用 `wait: false` + `dsh_wait_session`（等待从不取消），读取是窗口式（`mode`/`maxChars`/`afterSeq`）而非全量倾倒，以及审批和问题是按会话报告的，并且只有当部署启用了 `answerUserRequests` 时才可回答。
+- **`initialize` 指令是地图，而不是工具清单的倾倒。** 它说明哪个工具用于启动会话、哪个用于继续会话，何时使用 `wait: false` + `dsh_wait_session`（等待从不取消），读取是窗口式（`mode`/`maxChars`/`afterSeq`）而非全量倾倒，以及审批和问题是按会话报告的，并且只有当部署启用了 `answerApprovals`/`answerQuestions`（或旧的 `answerUserRequests`）时才可回答。
 - **描述承载了 schema 无法承载的内容。** `dsh_run_command(sessionId, line|command)` 在签名中写明了它的两种形态，因为模型如果照着错误的形态调用，结果比没有描述更糟。
 - **失败是分类型的。** 未知工具或格式错误的资源 id 会返回 `-32602 invalidParams`；普通的工具失败是 `isError` 结果，不会结束回合。消息会说明下一步该做什么（“用 `stopActivity: true` 重试”、“在 Harness GUI 中提高此会话的预设”），而不是泄露堆栈。
 - **工具面感知提示词开销。** `exposeToDshMode: lazy` 给 DSH 会话三个工具，而 `dsh_mcp_tools` 的描述已经携带所有已发布的名称及其必需参数（结果行是名称、用途和 `native`）；`full` 则把全部 21 个放入提示词。
@@ -61,7 +61,7 @@ node test/integration/protocol-and-tools.mjs       # 26 checks: apply(), endpoin
 node test/integration/sessions-and-identity.mjs    # 17 checks: waiting, whoami, ownership, restrictToOwner
 node test/integration/archive-permissions-commands.mjs # 24 checks: archive, permissions, models, commands
 node test/integration/transcripts.mjs              # 11 checks: outline/tail/paging, index, search, budget
-node test/integration/decisions.mjs                # 18 checks: parked approvals/questions, must-reply, busyMode
+node test/integration/decisions.mjs                # 20 checks: parked approvals/questions, per-kind answering, must-reply, busyMode
 node test/integration/config-and-grouping.mjs      # 32 checks: config route, presets, grouping, delivery, hot reload
 node test/mcp-conformance-test.mjs                 # 26 checks: protocol versions, methods, errors, auth
 node test/client-half-test.mjs         # 18 checks: the browser half's bundle page, its row page, its route

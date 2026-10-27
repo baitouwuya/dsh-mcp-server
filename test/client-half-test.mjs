@@ -119,7 +119,7 @@ const renderAll = (node) => {
   return { ...node, children: (node.children ?? []).map(renderAll) }
 }
 const labels = collectText(renderAll(panelPage({ view: 'page' })))
-for (const expected of ['Surface', 'On demand', 'All at once', 'Sidebar projects', 'Join an existing project', 'May create projects', 'Delivery while busy', 'Follow the setting', 'Queue', 'Steer', 'Sync progress when a task starts']) {
+for (const expected of ['Surface', 'On demand', 'All at once', 'Sidebar projects', 'Join an existing project', 'May create projects', 'Delivery while busy', 'Follow the setting', 'Queue', 'Steer', 'Sync progress when a task starts', 'Approvals', 'Questions']) {
   assert.ok(labels.includes(expected), `the settings page must offer "${expected}"`)
 }
 checks.push('the settings page renders every control it offers')
@@ -143,10 +143,12 @@ const findButtons = (node, found = []) => {
 }
 const panelTree = renderAll(panelPage({ view: 'page' }))
 const switches = findButtons(panelTree).filter((button) => button.props.role === 'switch')
-assert.equal(switches.length, 2, 'the page offers the enable switch and the sync switch')
+assert.equal(switches.length, 4, 'the page offers the enable, approval, question and sync switches')
 assert.equal(Boolean(switches[0].props.disabled), false, 'the enable switch is operable')
-assert.equal(Boolean(switches[1].props.disabled), false, 'the sync switch is operable')
-checks.push('both switches are operable in the ready state')
+assert.equal(Boolean(switches[1].props.disabled), false, 'the approval switch is operable')
+assert.equal(Boolean(switches[2].props.disabled), false, 'the question switch is operable')
+assert.equal(Boolean(switches[3].props.disabled), false, 'the sync switch is operable')
+checks.push('every switch is operable in the ready state')
 const panelCopy = labels.join(' ')
 assert.equal(/\b20 tools\b|20 个工具/.test(panelCopy), false, 'the page does not advertise a stale tool count')
 assert.match(panelCopy, /21 tools/, 'the page names the real published count')

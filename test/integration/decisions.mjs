@@ -339,6 +339,38 @@ try {
     assert.equal(statusWithPolicy.busyMode.effective, 'steer', 'the deployment setting is read live')
   })
 
+
+  // --- per-kind answering -------------------------------------------------------
+  // A question is a normal decision; an approval grants a sandbox escalation, so
+  // the two can be enabled independently.
+  const questionsOnly = await createPluginHarness({ label: 'questions-only', applyOptions: { answerQuestions: true } })
+  const approvalsOnly = await createPluginHarness({ label: 'approvals-only', applyOptions: { answerApprovals: true } })
+  try {
+    const questionStatus = await questionsOnly.call('dsh_status')
+    const approvalStatus = await approvalsOnly.call('dsh_status')
+    await check('answering questions and answering approvals are independent switches', () => {
+      assert.equal(typeof questionsOnly.hooks.get('user-questions/request'), 'function')
+      assert.equal(questionsOnly.hooks.get('approval/request'), undefined)
+      assert.deepEqual(questionStatus.answering, { approvals: false, questions: true, ownedSessionsOnly: true })
+      assert.equal(typeof approvalsOnly.hooks.get('approval/request'), 'function')
+      assert.equal(approvalsOnly.hooks.get('user-questions/request'), undefined)
+      assert.deepEqual(approvalStatus.answering, { approvals: true, questions: false, ownedSessionsOnly: true })
+    })
+    const answerPatch = await fetch(approvalsOnly.configUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ answerApprovals: false, answerQuestions: true }),
+    })
+    const answerPatchBody = await answerPatch.json()
+    await check('the configuration route accepts the per-kind answering switches', () => {
+      assert.equal(answerPatch.status, 200)
+      assert.equal(answerPatchBody.answerApprovals, false)
+      assert.equal(answerPatchBody.answerQuestions, true)
+    })
+  } finally {
+    await questionsOnly.close()
+    await approvalsOnly.close()
+  }
   h.finish()
 } finally {
   await h.close()
