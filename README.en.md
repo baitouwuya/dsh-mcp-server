@@ -124,8 +124,10 @@ The [docs index](docs/README.md) lists both languages.
 
 ## Status
 
-Version **0.23.1**, checked against **DSH 0.2.1-rc.3** (Cordis 4.0.5): 21 MCP tools, 2 resources, 1 resource
+Version **1.0.0**, checked against **DSH 0.2.1-rc.3** (Cordis 4.0.5): 21 MCP tools, 2 resources, 1 resource
 template, 249 offline checks plus live HTTP and stdio suites. Host-only, zero dependencies, MIT.
+Since 1.0.0 the tool names, resource URIs, configuration fields and the MCP protocol surface follow
+semantic versioning: breaking one of them takes a major release.
 The plugin imports no DSH package, so compatibility is a question of service contracts rather than a version
 pin — see [Internals](docs/en/internals.md#dsh-compatibility). Per-version changes are in [CHANGELOG.md](CHANGELOG.md).
 

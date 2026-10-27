@@ -3,6 +3,20 @@
 Notable changes to `dsh-mcp-btwy`. Older releases are listed on
 [GitHub Releases](https://github.com/baitouwuya/dsh-mcp-server/releases).
 
+## [1.0.0] - 2026-10-27
+
+### Changed
+
+- First stable release. The package is `dsh-mcp-btwy`, installable from npm, with two bundle rows
+  (`dsh-mcp-btwy`, `dsh-mcp-btwy/work-sync`), 21 MCP tools and 3 resources documented under `docs/`.
+  A profile that depended on the profile-local `@local/dsh-mcp-server` must switch its dependency.
+- The READMEs name the package in the title and link the npm page; 0.23.1 carried that change.
+
+### Notes
+
+- 1.0.0 marks the point where the tool names, resource URIs, configuration fields and the MCP protocol
+  surface are treated as stable: breaking one of them takes a major release.
+
 ## [0.23.1] - 2026-10-27
 
 ### Changed
