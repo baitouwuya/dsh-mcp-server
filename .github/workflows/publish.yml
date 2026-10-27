@@ -45,22 +45,21 @@ jobs:
           npm test
           npm run check:docs
 
-      - name: Skip a version the registry already has, or one still under review
+      - name: Skip a version the registry already has
         id: check
         run: |
           version="$(node -p "require('./package.json').version")"
           if npm view "dsh-mcp-btwy@$version" version >/dev/null 2>&1; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
             echo "dsh-mcp-btwy@$version is already published; nothing to do"
-          elif npm view dsh-mcp-btwy versions --json 2>/dev/null | grep -q '0.0.0-stage'; then
-            # npm stages the first release of a new package for review and holds a
-            # 0.0.0-stage placeholder until it clears. Publishing again would fail.
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "dsh-mcp-btwy is staged for review; npm publishes it when the review clears"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # Publishing needs either a NPM_TOKEN secret or trusted publishing set up on
+      # npmjs.com. Without one npm asks for a one-time password and the run would
+      # fail, so a tag verifies the release unless the repository opts in through
+      # the NPM_PUBLISH variable (set it to true once a trusted publisher exists).
       - name: Publish with a token
         if: steps.check.outputs.skip == 'false' && env.NPM_TOKEN != ''
         env:
@@ -68,5 +67,5 @@ jobs:
         run: npm publish --provenance --access public
 
       - name: Publish with OIDC trusted publishing
-        if: steps.check.outputs.skip == 'false' && env.NPM_TOKEN == ''
+        if: steps.check.outputs.skip == 'false' && env.NPM_TOKEN == '' && vars.NPM_PUBLISH == 'true'
         run: npm publish --provenance --access public
