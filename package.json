@@ -1,9 +1,12 @@
 {
-  "name": "@local/dsh-mcp-server",
-  "version": "0.22.0",
+  "name": "dsh-mcp-btwy",
+  "version": "0.23.0",
   "type": "module",
   "description": "Expose DeepSeek Harness sessions, agents, and tools to any other agent harness over the Model Context Protocol.",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "icon": "./icon.svg",
   "keywords": [
     "dsh",
@@ -35,7 +38,7 @@
     "./locale/*.json": "./locale/*.json"
   },
   "bin": {
-    "dsh-mcp-stdio": "./bin/dsh-mcp-stdio.mjs"
+    "dsh-mcp-stdio": "bin/dsh-mcp-stdio.mjs"
   },
   "scripts": {
     "test": "node test/mcp-self-test.mjs && node test/contracts-test.mjs && node test/authority-test.mjs && node test/transcript-test.mjs && node test/questions-test.mjs && node test/work-sync-test.mjs && node test/work-sync-plugin-test.mjs && node test/turn-wait-test.mjs && node test/integration/protocol-and-tools.mjs && node test/integration/sessions-and-identity.mjs && node test/integration/archive-permissions-commands.mjs && node test/integration/transcripts.mjs && node test/integration/decisions.mjs && node test/integration/config-and-grouping.mjs && node test/mcp-conformance-test.mjs && node test/client-half-test.mjs",

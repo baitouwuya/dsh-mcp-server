@@ -3,8 +3,8 @@
 # be reloaded, disabled, or replaced without touching the endpoint.
 - insert:
     - id: dsh-mcp-server
-      name: '@local/dsh-mcp-server'
+      name: 'dsh-mcp-btwy'
       config: {}
     - id: dsh-work-sync
-      name: '@local/dsh-mcp-server/work-sync'
+      name: 'dsh-mcp-btwy/work-sync'
       config: {}

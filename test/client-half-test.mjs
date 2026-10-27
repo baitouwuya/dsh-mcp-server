@@ -22,7 +22,7 @@ await import('../lib/client.js')
 
 assert.equal(loaded.length, 1, 'the bundle registers exactly one factory')
 const spec = loaded[0]
-assert.equal(spec.id, '@local/dsh-mcp-server', 'the browser module is this package')
+assert.equal(spec.id, 'dsh-mcp-btwy', 'the browser module is this package')
 checks.push('the client half registers under this package name')
 
 /** A React just real enough to build elements and hold hook state. */
@@ -69,14 +69,14 @@ assert.equal(registrations.length, 2, 'the client half registers the bundle page
 const page = registrations.find((entry) => entry.options.name === 'plugins.row.config')
 const bundle = registrations.find((entry) => entry.options.name === 'plugins.bundle.config')
 assert.ok(page, 'the row page entry is registered')
-assert.equal(page.options.key, '@local/dsh-mcp-server#dsh-mcp-server', 'keyed by package and row id')
+assert.equal(page.options.key, 'dsh-mcp-btwy#dsh-mcp-server', 'keyed by package and row id')
 checks.push('the page registers into the Plugins page under this bundle row')
 
 // The bundle's own page shows the panel directly, above its component rows: the
 // Plugins page renders plugins.bundle.config for the package whose name keys the
 // entry, so no row drill-down is needed to reach the switches.
 assert.ok(bundle, 'a plugins.bundle.config entry is registered')
-assert.equal(bundle.options.key, '@local/dsh-mcp-server', 'keyed by package name, as the bundle page looks it up')
+assert.equal(bundle.options.key, 'dsh-mcp-btwy', 'keyed by package name, as the bundle page looks it up')
 assert.equal(bundle.options.locale, 'dshMcpServer')
 checks.push('the same panel registers on the bundle page itself')
 
@@ -162,7 +162,7 @@ let written
 let command = null
 const handler = createConfigHandler({
   snapshot: () => ({
-    package: '@local/dsh-mcp-server',
+    package: 'dsh-mcp-btwy',
     version: '0.9.0',
     exposeToDsh: written?.exposeToDsh ?? true,
     exposeToDshMode: written?.exposeToDshMode ?? 'lazy',

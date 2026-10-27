@@ -6,13 +6,27 @@
 
 ## 安装到配置档案
 
+已发布到 npm，包名 `dsh-mcp-btwy`，零运行时依赖：
+
+```bash
+# 在 Plugins 页面点 Add plugin 并粘贴包名：
+dsh-mcp-btwy
+# 或命令行（profile 名以你的安装为准，桌面版是 desktop）：
+dsh plugin --profile desktop add dsh-mcp-btwy
+```
+
+要钉版本就写 `dsh-mcp-btwy@0.23.0`；要升级就再执行一次并重启 DSH。
+
+**从源码安装**（开发或离线）同样可行：
+
 ```bash
 git clone https://github.com/baitouwuya/dsh-mcp-server.git
 # then, from the Harness UI / plugin_manager:
 plugin_manager install_bundle --target /path/to/dsh-mcp-server
 ```
 
-或者等价地，使用 `action: install_bundle`，并把插件包的绝对目录作为 `target`。
+或者等价地，使用 `action: install_bundle`，并把插件包的绝对目录作为 `target`。源码安装时包名仍然是
+`dsh-mcp-btwy`——npm 名和仓库目录无关，patch 里的行名跟着包名走。
 
 插件包的 patch 会插入**两行**：`dsh-mcp-server`（端点）和 `dsh-work-sync`（任务启动进度同步，见[进度同步](work-sync.md)）。它们被刻意做成两个独立的行——同步可以禁用、重载或替换，而不影响端点；省略它的配置档案仍然提供 MCP 服务，并报告 `sync.present: false`。
 

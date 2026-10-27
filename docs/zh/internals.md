@@ -77,6 +77,21 @@ node test/live-e2e-test.mjs            # 46 checks over HTTP: protocol, resource
 
 开发过程中使用的实机检查还覆盖了：针对运行中 Harness 的真实 MCP 客户端交互，端到端的 `dsh_run_prompt` → `dsh_continue_session` → `dsh_read_session` 流程，通过 MCP 应用并重新固定权限预设、再将其从对话记录中折回，在不新增模型消息的情况下执行命令，等待一个已分离的回合而不取消它，通过请求头与 User-Agent 两级识别调用方，窗口化/大纲式对话记录读取，分离启动 + 取消，以及 stdio 桥接器。
 
+## 发布
+
+版本号出现在三处，必须一起改：`package.json`、`index.js` 的 `VERSION`、两份 README 的「状态」一节；再加一条 `CHANGELOG.md` 记录。测试或文档数量变化时，`docs/*/internals.md` 与 README 里的数字也要同步。`npm run verify` 全绿才继续。
+
+然后推一个 tag，由工作流发布：
+
+```bash
+git tag v0.23.0
+git push origin v0.23.0   # 触发 .github/workflows/publish.yml
+```
+
+工作流先核对 tag 与 `package.json` 的版本、跑测试与文档守卫，再用 npm 的 provenance 发布。首次发布用 `NPM_TOKEN` secret；之后在 npm 上把本仓库与 `publish.yml` 配成受信发布者（trusted publisher），工作流会改走 OIDC，不再需要令牌。手工发布等价于 `npm publish --provenance --access public`。
+
+包名就是行名：`cordis.patch.yml` 两行的 `name` 必须等于 `package.json` 的 `name`，所以改包名是破坏性变更——已有配置档案的依赖必须同步替换，否则行解析不到模块。
+
 ## 说明与限制
 
 - **对外公布的 URL 就是监听器自己的 URL。** 该行的 `url` 和 `DSH_WEB_URL` 仍然优先，但两者都未设置时，端点文件会在应用就绪后跟随 `ctx.webServer`（`protocol`/`host`/`port`），因此 GUI 端口由操作系统分配的 Harness 不会再向 stdio 桥接器和其他客户端公布一个失效的 `19387` URL。

@@ -1,7 +1,26 @@
 # Changelog
 
-Notable changes to `@local/dsh-mcp-server`. Older releases are listed on
+Notable changes to `dsh-mcp-btwy`. Older releases are listed on
 [GitHub Releases](https://github.com/baitouwuya/dsh-mcp-server/releases).
+
+## [0.23.0] - 2026-10-27
+
+### Changed
+
+- The package is now `dsh-mcp-btwy` and is published to npm, so the Plugins page's **Add plugin**
+  field and `dsh plugin add dsh-mcp-btwy` install it without cloning the repository. The bundle rows
+  in `cordis.patch.yml` follow the package name, as the loader resolves each row by module name.
+- Both READMEs lead with the npm install and keep the source install as the fallback, and they now
+  state the security boundary up front: loopback binding, the bearer token with no query-string form,
+  `restrictToOwner`, and what `answerApprovals` hands over.
+- `publishConfig.access` is `public`, and `.github/workflows/publish.yml` publishes a tag through
+  npm trusted publishing (or a `NPM_TOKEN` secret before that is configured), with provenance.
+
+### Migration
+
+- A profile that depended on `@local/dsh-mcp-server` (Git or link) must switch the dependency to
+  `dsh-mcp-btwy`: the patch row names changed with the package, so the old dependency no longer
+  matches the rows the bundle inserts.
 
 ## [0.22.0] - 2026-10-27
 

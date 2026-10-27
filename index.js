@@ -8,7 +8,7 @@
  * `tools`). It imports no DSH package and no third-party module, so the bundle
  * installs with no dependencies at all.
  *
- * @module @local/dsh-mcp-server
+ * @module dsh-mcp-btwy
  */
 
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
@@ -30,14 +30,14 @@ import { groupOwnedSessions } from './lib/workspace-grouping.js'
 import { errorText, sessionIdOf } from './lib/dsh-contracts.js'
 
 /** Keep in sync with package.json; reported through `initialize`. */
-const VERSION = '0.22.0'
+const VERSION = '0.23.0'
 
 /** This package's own name, as the profile's bundle row spells it. */
 const PACKAGE_NAME = (() => {
   try {
     return JSON.parse(readFileSync(join(import.meta.dirname, 'package.json'), 'utf8')).name
   } catch {
-    return '@local/dsh-mcp-server'
+    return 'dsh-mcp-btwy'
   }
 })()
 
@@ -169,7 +169,7 @@ export function apply(ctx, config = {}) {
   /**
    * The row that owns task-start progress sync.
    *
-   * Sync is its own bundle row now (`@local/dsh-mcp-server/work-sync`); this
+   * Sync is its own bundle row now (`dsh-mcp-btwy/work-sync`); this
    * bundle only reads the service for the settings page and `dsh_status`, and
    * writes the one switch through the profile editor.
    */
@@ -699,7 +699,7 @@ export function apply(ctx, config = {}) {
     const entry = rows.find((row) => row?.options?.id === syncEntryId)
     if (!entry) {
       const seen = rows.map((row) => row?.options?.id).filter(Boolean).join(', ')
-      const error = new Error(`The "${syncEntryId}" row is not in this profile's patch (saw: ${seen || 'no rows'}), so task-start sync cannot be switched here. Add the @local/dsh-mcp-server/work-sync bundle row, or edit cordis.patch.yml directly.`)
+      const error = new Error(`The "${syncEntryId}" row is not in this profile's patch (saw: ${seen || 'no rows'}), so task-start sync cannot be switched here. Add the dsh-mcp-btwy/work-sync bundle row, or edit cordis.patch.yml directly.`)
       error.expose = true
       throw error
     }

@@ -1,0 +1,11 @@
+# Submission for the community catalog (awesome-dsh-plugin) that also serves as
+# a DSH plugin market index. Copy this file into that repository as
+#   data/plugins/baitouwuya__dsh-mcp-server.yml
+# and open one pull request; the two generated READMEs are rebuilt after merge.
+# It is kept here so the listing text tracks the code it describes.
+url: https://github.com/baitouwuya/dsh-mcp-server
+name: baitouwuya/dsh-mcp-server
+category: tools
+description:
+  en: 'Publishes the running DSH host as a Model Context Protocol endpoint, so other harnesses (Claude Code, Cursor, Codex, another DSH) can start and continue sessions, read transcripts, wait on or cancel turns, and answer pending approvals, with per-caller attribution and owner-scoped sessions.'
+  zh: '把正在运行的 DSH 宿主发布成 MCP 端点，让别的 harness（Claude Code、Cursor、Codex、另一个 DSH）可以创建与延续会话、读取对话记录、等待或取消回合、代答待决审批；每个请求按调用方归属，会话锁定在创建者名下。'

@@ -1,0 +1,67 @@
+name: Publish
+
+# Publishes the package when a version tag is pushed. Trusted publishing (OIDC)
+# is the intended path: configure this repository and workflow as a trusted
+# publisher for dsh-mcp-btwy once on npmjs.com, then no token is stored here.
+# Before that configuration exists, add an NPM_TOKEN repository secret and the
+# same workflow publishes with it. A version that is already on the registry is
+# skipped, so tagging after a manual release stays green.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Use the npm that speaks trusted publishing
+        run: npm install -g npm@latest
+
+      - name: Refuse a tag that disagrees with the package version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$pkg" ]; then
+            echo "tag $tag does not match package.json $pkg"
+            exit 1
+          fi
+
+      - name: Test and check the docs before publishing
+        run: |
+          npm test
+          npm run check:docs
+
+      - name: Skip a version the registry already has
+        id: check
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if npm view "dsh-mcp-btwy@$version" version >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "dsh-mcp-btwy@$version is already published; nothing to do"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish with a token
+        if: steps.check.outputs.exists == 'false' && env.NPM_TOKEN != ''
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --provenance --access public
+
+      - name: Publish with OIDC trusted publishing
+        if: steps.check.outputs.exists == 'false' && env.NPM_TOKEN == ''
+        run: npm publish --provenance --access public

@@ -109,6 +109,29 @@ without adding a model message, waiting on a detached turn without cancelling it
 over the header and User-Agent rungs, windowed/outlined transcript reads, detached start + cancel,
 and the stdio bridge.
 
+## Releasing
+
+The version lives in three places that move together: `package.json`, `VERSION` in `index.js`, and
+the Status section of both READMEs — plus one `CHANGELOG.md` entry. When the number of tests or
+documents changes, the counts in `docs/*/internals.md` and the READMEs follow. Only continue once
+`npm run verify` is green.
+
+Then push a tag and let the workflow publish:
+
+```bash
+git tag v0.23.0
+git push origin v0.23.0   # triggers .github/workflows/publish.yml
+```
+
+The workflow checks the tag against `package.json`, runs the tests and the documentation guard, then
+publishes with npm provenance. The first release uses the `NPM_TOKEN` secret; after that, configure
+this repository and `publish.yml` as a trusted publisher on npm, and the workflow switches to OIDC,
+with no token stored. A manual release is the same as `npm publish --provenance --access public`.
+
+The package name is also the row name: the two `name` fields in `cordis.patch.yml` must equal
+`package.json`'s `name`, which makes a rename a breaking change — an existing profile's dependency
+has to move with it, or the rows resolve no module.
+
 ## Notes and limitations
 
 - **The advertised URL is the listener's own.** The row's `url` and `DSH_WEB_URL` still win, but with

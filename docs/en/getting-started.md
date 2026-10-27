@@ -6,13 +6,28 @@ Install the bundle, read the connection details, and point a client at the endpo
 
 ## Install into a profile
 
+It is published to npm as `dsh-mcp-btwy`, with no runtime dependencies:
+
+```bash
+# Plugins page -> Add plugin, then paste the package name:
+dsh-mcp-btwy
+# or from the command line (the profile name is the one you use; the desktop app's is desktop):
+dsh plugin --profile desktop add dsh-mcp-btwy
+```
+
+Pin a version with `dsh-mcp-btwy@0.23.0`; upgrade by running the command again and restarting DSH.
+
+**A source install** (development or offline) works as well:
+
 ```bash
 git clone https://github.com/baitouwuya/dsh-mcp-server.git
 # then, from the Harness UI / plugin_manager:
 plugin_manager install_bundle --target /path/to/dsh-mcp-server
 ```
 
-or, equivalently, `action: install_bundle` with the absolute package directory as `target`.
+or, equivalently, `action: install_bundle` with the absolute package directory as `target`. A source
+install still uses the package name `dsh-mcp-btwy`: the npm name does not follow the checkout directory,
+and the row names in the patch follow the package name.
 
 The bundle's patch inserts **two rows**: `dsh-mcp-server` (the endpoint) and `dsh-work-sync` (task-start
 progress sync, see [progress sync](work-sync.md)). They are separate rows on purpose — sync can be disabled, reloaded or replaced without

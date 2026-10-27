@@ -80,7 +80,7 @@
 ```yaml
 - insert:
     - id: dsh-mcp-server
-      name: '@local/dsh-mcp-server'
+      name: 'dsh-mcp-btwy'
       config:
         token: !!js process.env.DSH_MCP_TOKEN
         defaultCwd: /Users/me/work

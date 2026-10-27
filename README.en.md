@@ -48,13 +48,17 @@ other harness ──MCP (Streamable HTTP or stdio)──> DSH MCP Server ──>
 
 ## Quick start
 
-1. **Install the bundle** into a DSH profile:
+1. **Install the bundle into a DSH profile** (npm package `dsh-mcp-btwy`, zero dependencies):
 
    ```bash
-   git clone https://github.com/baitouwuya/dsh-mcp-server.git
-   # from the Harness UI / plugin_manager:
-   plugin_manager install_bundle --target /path/to/dsh-mcp-server
+   # Plugins page -> Add plugin, then paste the package name:
+   dsh-mcp-btwy
+   # or from the command line (the profile name is the one you use; the desktop app's is desktop):
+   dsh plugin --profile desktop add dsh-mcp-btwy
    ```
+
+   A source install (development or offline) works too: `git clone`, then paste the checkout path in
+   Add plugin, or `plugin_manager install_bundle --target /path/to/dsh-mcp-server`.
 
 2. **Read the connection details** the plugin publishes at mode 0600:
 
@@ -86,6 +90,21 @@ other harness ──MCP (Streamable HTTP or stdio)──> DSH MCP Server ──>
    dsh_continue_session({ "sessionId": "session-…", "prompt": "now list the TODOs" })
    ```
 
+## Security boundary
+
+The point of this plugin is to let **another harness drive this DSH instance**, so the boundary is part
+of the design rather than an option:
+
+- The endpoint binds the loopback address (`127.0.0.1`) by default; exposing it means setting `host`
+  explicitly, which you usually should not do.
+- Every request needs the bearer token written to `$DSH_HOME/mcp/dsh-mcp-endpoint.json` (mode 0600).
+  A token in the query string is refused, because it would land in proxy logs.
+- `restrictToOwner` keeps every caller inside the sessions it created; guest calls across sessions are refused.
+- Answering approvals (`answerApprovals`) hands over the consent that grants sandbox escalation; leave it
+  off unless you mean it.
+
+Confirm you trust the harness that will call this endpoint before installing: it runs with your user's authority.
+
 ## Documentation
 
 | Document | What is inside |
@@ -104,7 +123,7 @@ The [docs index](docs/README.md) lists both languages.
 
 ## Status
 
-Version **0.22.0**, checked against **DSH 0.2.1-rc.3** (Cordis 4.0.5): 21 MCP tools, 2 resources, 1 resource
+Version **0.23.0**, checked against **DSH 0.2.1-rc.3** (Cordis 4.0.5): 21 MCP tools, 2 resources, 1 resource
 template, 249 offline checks plus live HTTP and stdio suites. Host-only, zero dependencies, MIT.
 The plugin imports no DSH package, so compatibility is a question of service contracts rather than a version
 pin — see [Internals](docs/en/internals.md#dsh-compatibility). Per-version changes are in [CHANGELOG.md](CHANGELOG.md).

@@ -46,13 +46,17 @@ DSH：创建会话、推进回合、等待结果、读取对话记录、取消�
 
 ## 快速开始
 
-1. **把 bundle 装进 DSH 配置档案：**
+1. **安装到 DSH 配置档案**（npm 包 `dsh-mcp-btwy`，零依赖）：
 
    ```bash
-   git clone https://github.com/baitouwuya/dsh-mcp-server.git
-   # 在 Harness UI / plugin_manager 中：
-   plugin_manager install_bundle --target /path/to/dsh-mcp-server
+   # 在 Plugins 页面点 Add plugin，把包名粘进输入框：
+   dsh-mcp-btwy
+   # 或者命令行（profile 名以你的安装为准，桌面版是 desktop）：
+   dsh plugin --profile desktop add dsh-mcp-btwy
    ```
+
+   从源码安装（开发或离线）同样可行：`git clone` 后在 Add plugin 里粘仓库路径，或
+   `plugin_manager install_bundle --target /path/to/dsh-mcp-server`。
 
 2. **读取插件发布的连接信息**（文件权限 0600）：
 
@@ -84,6 +88,18 @@ DSH：创建会话、推进回合、等待结果、读取对话记录、取消�
    dsh_continue_session({ "sessionId": "session-…", "prompt": "now list the TODOs" })
    ```
 
+## 安全边界
+
+这个插件的用途是让**另一个 harness 操作本机这台 DSH**，所以边界是设计的一部分，不是可选项：
+
+- 端点默认只绑回环地址（`127.0.0.1`）；要对外暴露得显式改 `host`，而这通常不该做。
+- 每个请求都要 Bearer token；token 写在 `$DSH_HOME/mcp/dsh-mcp-endpoint.json`（权限 0600），
+  不接受 URL 查询串（那会进代理日志）。
+- `restrictToOwner` 把每个调用方限制在它自己创建的会话里；跨会话来宾调用被拒绝。
+- 代答审批（`answerApprovals`）等于把沙箱提权的同意权交出去；不确定时保持关闭。
+
+安装前请确认你信任会调用这个端点的 harness——它在你的用户权限下运行。
+
 ## 文档
 
 | 文档 | 内容 |
@@ -102,7 +118,7 @@ DSH：创建会话、推进回合、等待结果、读取对话记录、取消�
 
 ## 状态
 
-版本 **0.22.0**，已针对 **DSH 0.2.1-rc.3**（Cordis 4.0.5）验证：21 个 MCP 工具、2 个资源、
+版本 **0.23.0**，已针对 **DSH 0.2.1-rc.3**（Cordis 4.0.5）验证：21 个 MCP 工具、2 个资源、
 1 个资源模板、249 项离线检查，外加在线 HTTP 与 stdio 套件。仅宿主侧、零依赖、MIT。
 插件不 import 任何 DSH 包，所以兼容性取决于服务契约而不是版本锁定——见
 [内部实现](docs/zh/internals.md#dsh-兼容性)。逐版本变更见 [CHANGELOG.md](CHANGELOG.md)。
