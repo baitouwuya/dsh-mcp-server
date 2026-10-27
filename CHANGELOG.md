@@ -3,6 +3,13 @@
 Notable changes to `dsh-mcp-btwy`. Older releases are listed on
 [GitHub Releases](https://github.com/baitouwuya/dsh-mcp-server/releases).
 
+## [0.23.1] - 2026-10-27
+
+### Changed
+
+- The README title names the published package — `# DSH MCP Server (dsh-mcp-btwy)` — and an npm badge
+  links the registry page, so the GitHub page, the npm page and the Plugins page agree on one name.
+
 ## [0.23.0] - 2026-10-27
 
 ### Changed

@@ -1,7 +1,8 @@
-# DSH MCP Server
+# DSH MCP Server（dsh-mcp-btwy）
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![CI](https://github.com/baitouwuya/dsh-mcp-server/actions/workflows/ci.yml/badge.svg)](https://github.com/baitouwuya/dsh-mcp-server/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/dsh-mcp-btwy.svg)](https://www.npmjs.com/package/dsh-mcp-btwy)
 
 **简体中文** · [English](README.en.md)
 
@@ -118,7 +119,7 @@ DSH：创建会话、推进回合、等待结果、读取对话记录、取消�
 
 ## 状态
 
-版本 **0.23.0**，已针对 **DSH 0.2.1-rc.3**（Cordis 4.0.5）验证：21 个 MCP 工具、2 个资源、
+版本 **0.23.1**，已针对 **DSH 0.2.1-rc.3**（Cordis 4.0.5）验证：21 个 MCP 工具、2 个资源、
 1 个资源模板、249 项离线检查，外加在线 HTTP 与 stdio 套件。仅宿主侧、零依赖、MIT。
 插件不 import 任何 DSH 包，所以兼容性取决于服务契约而不是版本锁定——见
 [内部实现](docs/zh/internals.md#dsh-兼容性)。逐版本变更见 [CHANGELOG.md](CHANGELOG.md)。

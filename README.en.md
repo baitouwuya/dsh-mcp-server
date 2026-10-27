@@ -1,7 +1,8 @@
-# DSH MCP Server
+# DSH MCP Server (dsh-mcp-btwy)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![CI](https://github.com/baitouwuya/dsh-mcp-server/actions/workflows/ci.yml/badge.svg)](https://github.com/baitouwuya/dsh-mcp-server/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/dsh-mcp-btwy.svg)](https://www.npmjs.com/package/dsh-mcp-btwy)
 
 **English** · [简体中文](README.md)
 
@@ -123,7 +124,7 @@ The [docs index](docs/README.md) lists both languages.
 
 ## Status
 
-Version **0.23.0**, checked against **DSH 0.2.1-rc.3** (Cordis 4.0.5): 21 MCP tools, 2 resources, 1 resource
+Version **0.23.1**, checked against **DSH 0.2.1-rc.3** (Cordis 4.0.5): 21 MCP tools, 2 resources, 1 resource
 template, 249 offline checks plus live HTTP and stdio suites. Host-only, zero dependencies, MIT.
 The plugin imports no DSH package, so compatibility is a question of service contracts rather than a version
 pin — see [Internals](docs/en/internals.md#dsh-compatibility). Per-version changes are in [CHANGELOG.md](CHANGELOG.md).
