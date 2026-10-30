@@ -30,7 +30,7 @@ import { groupOwnedSessions } from './lib/workspace-grouping.js'
 import { errorText, sessionIdOf } from './lib/dsh-contracts.js'
 
 /** Keep in sync with package.json; reported through `initialize`. */
-const VERSION = '1.0.0'
+const VERSION = '1.0.1'
 
 /** This package's own name, as the profile's bundle row spells it. */
 const PACKAGE_NAME = (() => {
@@ -750,10 +750,33 @@ export function apply(ctx, config = {}) {
     })
     : undefined
 
+  /**
+   * The URL this plugin put in `DSH_MCP_URL`, so a later republish can correct it
+   * without overwriting a value the deployment set itself.
+   */
+  let ownedEnvUrl
+
+  /**
+   * Publish the endpoint URL for in-process consumers.
+   *
+   * A profile row that points DSH's own MCP client back at this endpoint cannot
+   * read the endpoint file from a `!!js` patch expression (the loader's scope has
+   * `process` but no `require`), and newer Harnesses bind an OS-assigned port — so
+   * the URL goes into the environment where that expression can see it. Only the
+   * URL: the token stays in the file, because the environment is inherited by child
+   * processes and agent sandboxes.
+   */
+  function publishEnvUrl(url) {
+    if (process.env.DSH_MCP_URL !== undefined && process.env.DSH_MCP_URL !== ownedEnvUrl) return
+    process.env.DSH_MCP_URL = url
+    ownedEnvUrl = url
+  }
+
   /** Publish connection details so stdio bridges and humans can find the endpoint. */
   async function publishEndpoint() {
     if (!writeEndpointFile) return
     const url = `${resolveBaseUrl()}${path}`
+    publishEnvUrl(url)
     const payload = {
       url,
       token,

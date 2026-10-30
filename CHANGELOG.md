@@ -3,6 +3,24 @@
 Notable changes to `dsh-mcp-btwy`. Older releases are listed on
 [GitHub Releases](https://github.com/baitouwuya/dsh-mcp-server/releases).
 
+## [1.0.1] - 2026-10-30
+
+### Changed
+
+- Re-validated against **DSH 0.2.1-rc.5** (Cordis 4.0.5): 250 offline checks, 46 live MCP checks, 4 stdio
+  bridge checks, and a handshake from the official MCP client (`@modelcontextprotocol/client` 2.2.0 and
+  2.4.0) against the running endpoint. rc.5's stricter client composition still accepts this package's
+  `dsh.client` declaration, and the endpoint still advertises 21 tools, 3 resources and 1 template.
+- The plugin publishes its endpoint URL as `DSH_MCP_URL` for in-process consumers. Newer Harnesses bind an
+  OS-assigned Web port, so a profile row that points DSH's own MCP client back at this endpoint can no
+  longer hardcode one; the `selfcheck` bundle follows the environment variable instead.
+
+### Notes
+
+- The `dsh-mcp-selfcheck` row is disabled in the desktop profile: with a dynamic port it could only dial a
+  dead URL, and the plugin's own front door already gives sessions the same tools at a fraction of the
+  prompt cost. Pin the Web port to bring the native `mcp__dsh__*` shape back.
+
 ## [1.0.0] - 2026-10-27
 
 ### Changed

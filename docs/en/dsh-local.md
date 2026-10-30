@@ -100,3 +100,32 @@ An internal caller is attributed and clamped, never trusted:
 
 External MCP callers are unchanged — they present this endpoint's token, and the ceiling governs calls
 made from inside DSH. The Harness GUI remains an answerer in every race.
+
+## Connecting DSH's own MCP client
+
+DSH 0.2.1-rc.5 ships its own MCP client, so besides the built-in front door above, the Harness can
+connect to this endpoint like any other MCP server. Its tools then appear in the session as
+`mcp__<serverName>__<name>`:
+
+```yaml
+- id: mcp-self
+  name: '@deepseek-ai/dsh-mcp-client'
+  config:
+    serverName: dsh
+    transport: streamable-http
+    url: http://127.0.0.1:19387/mcp
+    headers:
+      Authorization: Bearer <token>
+```
+
+The two paths divide the work differently: the built-in front door needs no configuration and loads on
+demand, with `dsh_mcp_call` for one-offs; the native client registers every tool as a permanent tool
+(`mcp__dsh__*`) whose schema stays in the prompt, so it is usually worth enabling only when that name
+shape is what you need.
+
+The endpoint URL and token live in `$DSH_HOME/mcp/dsh-mcp-endpoint.json`. The port in that URL is
+assigned by the Harness at boot — not the historical `19387` — so do not hardcode it: the plugin
+publishes the URL as the `DSH_MCP_URL` environment variable, which a patch expression can read; pin the
+Web port when the URL has to be known before the listener binds. The token is a local secret — keep it
+out of shared configuration and out of the repository.
+

@@ -31,7 +31,7 @@
 
 ## DSH 兼容性
 
-插件包不导入任何 DSH 包，因此兼容性取决于服务契约，而不是版本锁定。它已在运行中的 Harness 上针对 **DSH 0.2.1-rc.3**（Cordis 4.0.5）做过验证：会话控制器（`list`、`resolveAgent`、`create`、`cancel`、`follow`、`selectModel`）、`sessionQuery`、实时的 `agents` 注册表及其句柄方法（`followup`、`steer`、`inject`）、`permissionPresets`、`commands`、`workspaceRegistry`、`configEditor`、`clientModules`、Web 服务器路由、`session/event` 的形态与回合结束原因，以及 Web 模块加载器的种子（`react`、`@deepseek-ai/dsh-client-ui-primitives`、`…-ui-slots` 等）与 `plugins.row.config` / `plugins.bundle.config` 槽位键。
+插件包不导入任何 DSH 包，因此兼容性取决于服务契约，而不是版本锁定。它已在运行中的 Harness 上针对 **DSH 0.2.1-rc.5**（Cordis 4.0.5）做过验证：会话控制器（`list`、`resolveAgent`、`create`、`cancel`、`follow`、`selectModel`）、`sessionQuery`、实时的 `agents` 注册表及其句柄方法（`followup`、`steer`、`inject`）、`permissionPresets`、`commands`、`workspaceRegistry`、`configEditor`、`clientModules`、Web 服务器路由、`session/event` 的形态与回合结束原因，以及 Web 模块加载器的种子（`react`、`@deepseek-ai/dsh-client-ui-primitives`、`…-ui-slots` 等）与 `plugins.row.config` / `plugins.bundle.config` 槽位键。
 
 有一条 Harness 规则对所有响应 `session/event` 的插件都很重要：监听器运行在**会话的追加提交内部**，此时嵌套追加会被拒绝（`session append cannot reenter while another append is being published`）。本插件包从监听器发出的每次投递——必须回复型提醒的注入或撤回、work-sync 的报告或超时提示——都会在投递前让出一个微任务，确保提交已经先关闭。
 
@@ -56,7 +56,7 @@ node test/questions-test.mjs           # 17 checks: must-reply ids, injected id-
 node test/work-sync-test.mjs           # 22 checks: the progress-sync engine against a fake Harness
 node test/work-sync-plugin-test.mjs    # 5 checks: the sync bundle row's service, messages, switch, disposal
 node test/turn-wait-test.mjs          # 2 checks: which turn a queued or steered prompt reports
-node test/integration/protocol-and-tools.mjs       # 26 checks: apply(), endpoint file, tools, status, the
+node test/integration/protocol-and-tools.mjs       # 27 checks: apply(), endpoint file, tools, status, the
                                                    # lazy front door, its authority ceiling, lossless values
 node test/integration/sessions-and-identity.mjs    # 17 checks: waiting, whoami, ownership, restrictToOwner
 node test/integration/archive-permissions-commands.mjs # 24 checks: archive, permissions, models, commands
@@ -72,6 +72,8 @@ node test/live-e2e-test.mjs            # 46 checks over HTTP: protocol, resource
 ```
 
 `npm run check:docs` 守的是 Markdown：每个相对链接与锚点都可解析，`docs/zh/` 与 `docs/en/` 保持相同的标题层级、表格、代码围栏和行内标识符。CI（`.github/workflows/ci.yml`）两者都跑。
+
+针对 0.2.1-rc.5 的复验也覆盖了客户端那一侧：组合器仍接受本文的 `dsh.client` 声明与 `plugins.row.config` / `plugins.bundle.config` 槽位，`dsh_status.clientPage.inGraph` 为 `true`；官方 MCP 客户端（`@modelcontextprotocol/client` 2.2.0 与 2.4.0）各握手一次，21 个工具、3 个资源、1 个模板与 `dsh_status` 都正常，协商落在 `2025-11-25`，请求 `2026-07-28` 时也原样回显。
 
 桥接器的 schema 投影已针对 Harness **自身**的 JSON-Schema 校验器（从应用包中提取）验证：21 个原始 MCP schema 中有 15 个使用了 `minLength`，而该校验器会直接拒绝这个关键字；全部 21 个投影后的 schema——以及各种形态的规范值——都能被接受。
 

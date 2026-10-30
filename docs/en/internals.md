@@ -37,7 +37,7 @@ disk**: everything this plugin persists is its own state (`$DSH_HOME/mcp/*.json`
 ## DSH compatibility
 
 The bundle imports no DSH package, so compatibility is a question of service contracts rather than a
-version pin. It is checked against **DSH 0.2.1-rc.3** (Cordis 4.0.5) on the live Harness: the session
+version pin. It is checked against **DSH 0.2.1-rc.5** (Cordis 4.0.5) on the live Harness: the session
 controller (`list`, `resolveAgent`, `create`, `cancel`, `follow`, `selectModel`), `sessionQuery`,
 the live `agents` registry and its handle methods (`followup`, `steer`, `inject`), `permissionPresets`,
 `commands`, `workspaceRegistry`, `configEditor`, `clientModules`, the web-server route, the
@@ -81,7 +81,7 @@ node test/questions-test.mjs           # 17 checks: must-reply ids, injected id-
 node test/work-sync-test.mjs           # 22 checks: the progress-sync engine against a fake Harness
 node test/work-sync-plugin-test.mjs    # 5 checks: the sync bundle row's service, messages, switch, disposal
 node test/turn-wait-test.mjs          # 2 checks: which turn a queued or steered prompt reports
-node test/integration/protocol-and-tools.mjs       # 26 checks: apply(), endpoint file, tools, status, the
+node test/integration/protocol-and-tools.mjs       # 27 checks: apply(), endpoint file, tools, status, the
                                                    # lazy front door, its authority ceiling, lossless values
 node test/integration/sessions-and-identity.mjs    # 17 checks: waiting, whoami, ownership, restrictToOwner
 node test/integration/archive-permissions-commands.mjs # 24 checks: archive, permissions, models, commands
@@ -97,6 +97,8 @@ node test/live-e2e-test.mjs            # 46 checks over HTTP: protocol, resource
 ```
 
 `npm run check:docs` guards the Markdown instead: every relative link and anchor resolves, and `docs/zh/` keeps the same heading levels, tables, code fences and inline identifiers as `docs/en/`. CI (`.github/workflows/ci.yml`) runs both.
+
+Re-validating on 0.2.1-rc.5 covered the client side too: the composer still accepts this package's `dsh.client` declaration and both the `plugins.row.config` / `plugins.bundle.config` slots, `dsh_status.clientPage.inGraph` is `true`, and the official MCP client (`@modelcontextprotocol/client` 2.2.0 and 2.4.0) handshakes once each — 21 tools, 3 resources, 1 template and `dsh_status` all behave, negotiating `2025-11-25` and echoing `2026-07-28` when asked.
 
 The bridge's schema projection was verified against the Harness's **own** JSON-Schema validator
 (extracted from the app bundle): 15 of the 21 raw MCP schemas use `minLength`, a keyword that validator

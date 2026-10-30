@@ -34,6 +34,12 @@ try {
     assert.equal(init.result.serverInfo.name, 'dsh-mcp-server')
   })
 
+  await check('the plugin publishes its endpoint URL for in-process consumers', () => {
+    // A profile row that points DSH's own MCP client back at this endpoint can only
+    // read `process`, not the endpoint file, so the URL has to be in the environment.
+    assert.equal(process.env.DSH_MCP_URL, 'http://127.0.0.1:9/mcp')
+  })
+
   const run = await call('dsh_run_prompt', { prompt: PROMPT, cwd: '/tmp' })
   const sessionIdFromRun = run.sessionId
   await check('dsh_run_prompt creates a session and returns the final assistant text', () => {

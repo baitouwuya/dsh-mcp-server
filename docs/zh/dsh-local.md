@@ -93,3 +93,28 @@
 
 外部 MCP 调用方不受影响——它们出示本端点的令牌，而该上限约束的是从 DSH 内部发起的调用。
 无论何时竞争，Harness GUI 都仍是应答方之一。
+
+## 用 DSH 自己的 MCP 客户端连进来
+
+DSH 0.2.1-rc.5 起自带 MCP 客户端，所以除了上面这扇内建前门，也能让 Harness 像连接任意 MCP
+服务器那样连接本端点。工具会以 `mcp__<serverName>__<name>` 的形式出现在会话里：
+
+```yaml
+- id: mcp-self
+  name: '@deepseek-ai/dsh-mcp-client'
+  config:
+    serverName: dsh
+    transport: streamable-http
+    url: http://127.0.0.1:19387/mcp
+    headers:
+      Authorization: Bearer <token>
+```
+
+两条路分工不同：内建前门零配置、按需加载，一次性调用走 `dsh_mcp_call`；原生客户端把每个工具都注册
+成常驻工具（`mcp__dsh__*`），schema 一直占着提示词，通常只在确实需要那个命名形状时才值得开启。
+
+端点 URL 与令牌写在 `$DSH_HOME/mcp/dsh-mcp-endpoint.json`。URL 里的端口由 Harness 在启动时分配，
+不是历史默认的 `19387`，所以别把它写死：插件会把 URL 发布成环境变量 `DSH_MCP_URL`，补丁表达式
+可以读取它；需要在监听绑定之前就知道 URL 时，先把 Web 端口固定下来。令牌是本机密文，不要写进共享
+配置，也不要提交到仓库。
+

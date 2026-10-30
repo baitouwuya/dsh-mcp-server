@@ -529,6 +529,9 @@ export async function createPluginHarness(options = {}) {
   const hooks = new Map()
   const disposers = []
   const ctx = makeContext(fake.services, disposers, hooks)
+  // The plugin publishes its endpoint URL here; start from a clean shelf so one
+  // test's URL cannot leak into another's assertion.
+  delete process.env.DSH_MCP_URL
   apply(ctx, {
     token,
     endpointFile,

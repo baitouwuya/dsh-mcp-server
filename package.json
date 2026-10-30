@@ -1,6 +1,6 @@
 {
   "name": "dsh-mcp-btwy",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "module",
   "description": "Expose DeepSeek Harness sessions, agents, and tools to any other agent harness over the Model Context Protocol.",
   "license": "MIT",

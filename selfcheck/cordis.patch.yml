@@ -13,7 +13,11 @@
       config:
         serverName: dsh
         transport: streamable-http
-        url: http://127.0.0.1:19387/mcp
+        # A newer Harness assigns the Web port at boot, so follow the URL the plugin
+        # publishes (DSH_MCP_URL) instead of assuming the historical default. The
+        # expression is evaluated when this row activates; if the port is not known
+        # yet, pin the Web port for the profile so the URL is stable.
+        url: !!js 'process.env.DSH_MCP_URL ?? "http://127.0.0.1:19387/mcp"'
         headers:
           Authorization: !!js '`Bearer ${process.env.DSH_MCP_TOKEN}`'
         failOnStartupError: false
