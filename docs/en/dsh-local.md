@@ -123,6 +123,11 @@ demand, with `dsh_mcp_call` for one-offs; the native client registers every tool
 (`mcp__dsh__*`) whose schema stays in the prompt, so it is usually worth enabling only when that name
 shape is what you need.
 
+Each call through that row is capped by `toolCallTimeoutMs` (60 s by default), and the cap covers the
+whole call: a `dsh_wait_session` that waits longer fails inside the client, whatever the server sends.
+Raise that field for long waits, or wait in shorter installments — `status: "timedOut"` is a normal
+answer, and calling again continues the same wait.
+
 The endpoint URL and token live in `$DSH_HOME/mcp/dsh-mcp-endpoint.json`. The port in that URL is
 assigned by the Harness at boot — not the historical `19387` — so do not hardcode it: the plugin
 publishes the URL as the `DSH_MCP_URL` environment variable, which a patch expression can read; pin the

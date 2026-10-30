@@ -125,6 +125,11 @@ launcher to the endpoint through `x-dsh-mcp-client`, from `--client <label>`, el
 `DSH_MCP_CLIENT`, else the parent process name, else `stdio-bridge` — set the variable in the other
 harness' MCP server config when the parent is a bare runtime such as `node`.
 
+Long waits stay connected: the endpoint answers a slow tool as an event stream once it has run for 10 s,
+and the bridge reads that form, so `dsh_wait_session` is not cut off by a client's own 300 s
+response-header timeout. The bridge also re-reads the endpoint file before every request, so a Harness
+restart on a new port needs no bridge restart.
+
 Because GUI clients launch with a minimal `PATH`, point `command` at an absolute Node binary and rely
 on the bridge's `~/.dsh` discovery (both verified with only `HOME` and `PATH` set):
 

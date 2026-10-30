@@ -65,6 +65,8 @@ node test/integration/decisions.mjs                # 20 checks: parked approvals
 node test/integration/config-and-grouping.mjs      # 32 checks: config route, presets, grouping, delivery, hot reload
 node test/mcp-conformance-test.mjs                 # 26 checks: protocol versions, methods, errors, auth
 node test/client-half-test.mjs         # 18 checks: the browser half's bundle page, its row page, its route
+node test/streaming-transport-test.mjs  # 5 checks: the JSON reply, the SSE reply with keep-alives, a JSON-only client, a streamed error
+node test/stdio-stream-test.mjs         # 3 checks: the bridge parses an event stream and re-reads the endpoint file
 node test/stdio-bridge-test.mjs        # 4 checks, needs a RUNNING Harness (one real delegated turn)
 node test/live-e2e-test.mjs            # 46 checks over HTTP: protocol, resources, all twenty-one tools,
                                        # archive/unarchive, permission presets, commands, error paths,

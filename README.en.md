@@ -25,6 +25,9 @@ other harness ──MCP (Streamable HTTP or stdio)──> DSH MCP Server ──>
 - **Drive DSH from any MCP client.** `dsh_run_prompt` starts a session and returns its `sessionId`;
   `dsh_continue_session` keeps its context and workspace; `dsh_wait_session` waits without cancelling;
   `dsh_cancel_session` stops a turn and keeps the inbox. Works over Streamable HTTP or the stdio bridge.
+- **Long calls outlive a client's timeouts.** A call still running after 10 s answers as an event stream —
+  headers at once, a `: keep-alive` comment every 15 s, then the JSON-RPC response — so a
+  `dsh_wait_session` lasting minutes is not cut off by a client's 300 s response-header limit.
 - **Read and search without dumping.** `dsh_list_sessions` pages the index, `dsh_search_sessions`
   returns bounded snippets, and `dsh_read_session` reads tail/head/outline windows with cursors, caps and
   a response budget. Every payload reports what it did not return.
@@ -124,8 +127,8 @@ The [docs index](docs/README.md) lists both languages.
 
 ## Status
 
-Version **1.0.1**, checked against **DSH 0.2.1-rc.5** (Cordis 4.0.5): 21 MCP tools, 2 resources, 1 resource
-template, 250 offline checks plus live HTTP and stdio suites. Host-only, zero dependencies, MIT.
+Version **1.0.2**, checked against **DSH 0.2.1-rc.5** (Cordis 4.0.5): 21 MCP tools, 2 resources, 1 resource
+template, 258 offline checks plus live HTTP and stdio suites. Host-only, zero dependencies, MIT.
 DSH 0.2.1-rc.5 ships its own MCP client, so besides this plugin's built-in front door the Harness can
 connect to this endpoint directly — see
 [Connecting DSH's own MCP client](docs/en/dsh-local.md#connecting-dshs-own-mcp-client).

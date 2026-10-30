@@ -24,6 +24,9 @@ DSH：创建会话、推进回合、等待结果、读取对话记录、取消�
 - **用任意 MCP 客户端驱动 DSH。** `dsh_run_prompt` 创建会话并返回 `sessionId`；
   `dsh_continue_session` 延续它的上下文与工作区；`dsh_wait_session` 只等待、不取消；
   `dsh_cancel_session` 停止回合但保留收件箱。Streamable HTTP 与 stdio 桥都可用。
+- **长调用不会撞上客户端自己的超时。** 超过 10 秒仍在运行的调用改以事件流作答——立刻发出响应头，
+  之后每 15 秒一条 `: keep-alive` 注释，最后是该 JSON-RPC 响应——所以持续数分钟的 `dsh_wait_session`
+  不会被客户端 300 秒的响应头上限掐断。
 - **读得准，而不是整份倒出来。** `dsh_list_sessions` 分页列出会话索引，`dsh_search_sessions`
   只返回有限的片段，`dsh_read_session` 以 tail/head/outline 窗口读取，带游标、单条上限和整包预算；
   每个结果都会说明它没有返回什么。
@@ -119,8 +122,8 @@ DSH：创建会话、推进回合、等待结果、读取对话记录、取消�
 
 ## 状态
 
-版本 **1.0.1**，已针对 **DSH 0.2.1-rc.5**（Cordis 4.0.5）验证：21 个 MCP 工具、2 个资源、
-1 个资源模板、250 项离线检查，外加在线 HTTP 与 stdio 套件。仅宿主侧、零依赖、MIT。
+版本 **1.0.2**，已针对 **DSH 0.2.1-rc.5**（Cordis 4.0.5）验证：21 个 MCP 工具、2 个资源、
+1 个资源模板、258 项离线检查，外加在线 HTTP 与 stdio 套件。仅宿主侧、零依赖、MIT。
 DSH 0.2.1-rc.5 起自带 MCP 客户端，所以除了本插件的内建前门，也能让 Harness 直接连接本端点——见
 [用 DSH 自己的 MCP 客户端连进来](docs/zh/dsh-local.md#用-dsh-自己的-mcp-客户端连进来)。
 从 1.0.0 起，工具名、资源 URI、配置字段与 MCP 协议面按语义化版本对待：破坏其中任何一项都需要大版本。

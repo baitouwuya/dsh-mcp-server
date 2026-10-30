@@ -97,16 +97,24 @@ Content-Type: application/json
 ## 会话与传输
 
 端点是**无状态**的：从不返回 `Mcp-Session-Id`，从不要求它，客户端自带的会话头会被接受但忽略。
-`initialize` 之前的请求照常服务，也没有服务端发起的 SSE 流——`GET` 与 `DELETE` 返回 405 和
+`initialize` 之前的请求照常服务，也没有与请求无关的流——`GET` 与 `DELETE` 返回 405 和
 `allow: POST, OPTIONS`，`OPTIONS` 返回 204。一个 POST 携带一条 JSON-RPC 消息（批处理以
-`-32600` 拒绝），回复是 `application/json`。请求体默认上限 8 MiB，`maxBodyBytes` 把它夹在
-1 KiB–64 MiB；超限返回 413 和 `-32700`。
+`-32600` 拒绝），回复有两种形态。10 秒内完成的调用——或者来自 `Accept` 里没有 `text/event-stream` 的客户端的调用——
+仍以单个 `application/json` 应答。超过 10 秒仍在运行的调用改以 `text/event-stream` 应答：立刻发出状态行与
+响应头，之后每 15 秒一条 SSE 注释（`: keep-alive`），最后由该 JSON-RPC 响应作为一条 `message` 事件收尾。
+第二种形态的存在理由是：第一种在工具返回之前一个字节都不发，而基于 undici 的客户端（Node 的 `fetch`，
+也就是 stdio 桥、Claude Code、Codex）对响应头未在 `headersTimeout`（默认 300 秒）内到达的请求会直接放弃。
+这正是长 `dsh_wait_session` 以前撞上的情况：等待超过客户端的响应头超时，客户端报 `fetch failed`，而毫秒级
+返回的 `dsh_read_session` 一切正常。请求体默认上限 8 MiB，`maxBodyBytes` 把它夹在 1 KiB–64 MiB；
+超限返回 413 和 `-32700`。
 
 信封校验是结构性的：对象里必须有一个字符串 `method`。`jsonrpc` 成员不会被再次校验，所以省略它、
 或写成 `1.0` 的消息仍会被分发——但每个响应都声明 `2.0`。协议层不会拒绝未知的 `params` 成员；各方法只校验
 自己用到的字段。
 
-stdio 桥还会自己产生一个错误码：连不上 HTTP 端点时的 `-32000`。它来自桥，不来自这个网关。
+stdio 桥还会自己产生一个错误码：连不上 HTTP 端点时的 `-32000`。它来自桥，不来自这个网关。桥两种回复
+形态都读——JSON 主体，以及慢调用产生的事件流——并且在每次请求前重新读取
+`$DSH_HOME/mcp/dsh-mcp-endpoint.json`，所以 Harness 换端口重启后，启动桥的那个 harness 不必跟着重启。
 
 ## 不支持
 
@@ -115,5 +123,6 @@ stdio 桥还会自己产生一个错误码：连不上 HTTP 端点时的 `-32000
 - `completion/complete`：未实现参数补全。
 - `resources/subscribe` 与 `resources/unsubscribe`：`subscribe` 声明为 false。
 - `notifications/tools/list_changed` 与 `notifications/resources/list_changed`：从不发送。
-- 基于 `GET` 的 SSE 续传与基于 `DELETE` 的显式会话终止：未实现，两者都是 405。
+- 基于 `GET` 的 SSE 续传、任何与请求无关的流，以及基于 `DELETE` 的显式会话终止：未实现，两者都是 405。
+  本服务端确实使用的事件流，始终是对某一个 POST 的应答。
 - JSON-RPC 批处理与查询字符串令牌：拒绝。

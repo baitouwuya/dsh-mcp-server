@@ -3,6 +3,30 @@
 Notable changes to `dsh-mcp-btwy`. Older releases are listed on
 [GitHub Releases](https://github.com/baitouwuya/dsh-mcp-server/releases).
 
+## [1.0.2] - 2026-10-30
+
+### Fixed
+
+- A tool call that blocks longer than a client's own response timeout no longer looks like a dropped
+  connection. The HTTP route used to hold a silent `application/json` reply for the whole call — no status
+  line, no headers — so an undici-based client (Node's `fetch`, hence the stdio bridge, Claude Code, Codex)
+  gave up at its 300 s `headersTimeout` and reported `fetch failed`, while `dsh_read_session` kept working.
+  A reply still pending after 10 s now switches to `text/event-stream`: headers immediately, a
+  `: keep-alive` comment every 15 s, then the JSON-RPC response as the closing `message` event. Fast calls
+  keep the plain JSON body, and a client whose `Accept` does not name `text/event-stream` is never streamed to.
+- The stdio bridge parses that event stream — it would otherwise fail every long wait with a JSON parse
+  error — and re-reads `$DSH_HOME/mcp/dsh-mcp-endpoint.json` before each request, so a Harness that
+  restarted on a new port is picked up without restarting the harness that launched it.
+
+### Notes
+
+- Reproduced before the fix: `dsh_wait_session` with `timeoutMs: 420000` through the bridge returned
+  `-32000` "endpoint is unavailable: fetch failed" at 300.9 s, while `dsh_read_session` answered in ~0.7 s
+  throughout and `curl` (no header timeout of its own) stayed connected. Old transcripts show the same
+  signature: every failing wait took 304 s and asked for more than 300 s, every passing one finished within 244 s.
+- DSH's own MCP client caps each tool call at the row's `toolCallTimeoutMs` (60 s by default). That ceiling is
+  client-side and a server cannot lift it: raise it for long waits, or wait in shorter installments.
+
 ## [1.0.1] - 2026-10-30
 
 ### Changed

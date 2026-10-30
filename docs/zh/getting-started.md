@@ -104,6 +104,10 @@ Authorization: Bearer <token>
 
 它原样转发 JSON-RPC 消息，在客户端发送 `notifications/cancelled` 时取消上游请求，并保持 stdout 干净（诊断信息写入 stderr）。它还通过 `x-dsh-mcp-client` 向端点标识自己的启动者，取值依次为 `--client <label>`、`DSH_MCP_CLIENT`、父进程名，最后回退到 `stdio-bridge`——当父进程是 `node` 这样的裸运行时，请在其他 harness 的 MCP 服务器配置中设置该变量。
 
+长等待不会掉线：慢工具运行到 10 秒后，端点改以事件流作答，桥接器会读这种形态，所以 `dsh_wait_session`
+不会被客户端自己的 300 秒响应头超时掐断。桥接器还会在每次请求前重新读取端点文件，因此 Harness 换端口
+重启后不必重启桥接器。
+
 由于 GUI 客户端启动时 `PATH` 很精简，请把 `command` 指向 Node 的绝对路径，并依赖桥接器的 `~/.dsh` 发现逻辑（两者都只在仅设置 `HOME` 和 `PATH` 的情况下验证过）：
 
 | 客户端 | 配置文件 | 入口 |

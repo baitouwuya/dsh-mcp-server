@@ -6,6 +6,8 @@
  * Harnesses that only speak MCP over stdio (Claude Code, Cursor, Codex, …) can
  * launch this file as their MCP server command; it forwards every JSON-RPC
  * message to the DSH host over Streamable HTTP and streams the replies back.
+ * Both reply forms are accepted: a plain JSON body, and the event-stream the
+ * endpoint switches to when a tool (a wait, a whole delegated turn) runs long.
  * It has no dependencies and needs no DSH package.
  *
  * Endpoint discovery, in order:
@@ -48,24 +50,29 @@ const args = parseArgs(process.argv.slice(2))
 const dshHome = args['dsh-home'] ?? process.env.DSH_HOME ?? join(homedir(), '.dsh')
 const endpointFile = args['endpoint-file'] ?? join(dshHome, 'mcp', 'dsh-mcp-endpoint.json')
 
-/** Load `{ url, token }` from arguments, environment, or the plugin's endpoint file. */
+/**
+ * Load `{ url, token }` from arguments, environment, or the plugin's endpoint
+ * file.
+ *
+ * The file is read on every request on purpose: the Harness assigns its
+ * listener port at boot, so a bridge that cached the URL at startup goes on
+ * dialling the previous instance's port after a restart.
+ */
 function resolveEndpoint() {
-  let fileValue
-  const readFile = () => {
-    if (fileValue !== undefined) return fileValue
-    try {
-      fileValue = JSON.parse(readFileSync(endpointFile, 'utf8'))
-    } catch {
-      fileValue = null
-    }
-    return fileValue
-  }
   const fromEnv = process.env.DSH_MCP_URL
   const envToken = process.env.DSH_MCP_TOKEN
-  const file = fromEnv && envToken ? undefined : readFile()
-  const url = args.url ?? fromEnv ?? file?.url
-  const token = args.token ?? envToken ?? file?.token
-  return { url, token }
+  let file
+  if (!(fromEnv && envToken)) {
+    try {
+      file = JSON.parse(readFileSync(endpointFile, 'utf8'))
+    } catch {
+      file = undefined
+    }
+  }
+  return {
+    url: args.url ?? fromEnv ?? file?.url,
+    token: args.token ?? envToken ?? file?.token,
+  }
 }
 
 const log = (...parts) => process.stderr.write(STDERR_PREFIX + parts.join(' ') + '\n')
@@ -109,6 +116,56 @@ let endpoint = resolveEndpoint()
 log(`identifying as "${clientLabel}"`)
 let closing = false
 
+/**
+ * Read an SSE reply, handing every JSON-RPC message it carries to `onMessage`.
+ *
+ * The endpoint sends `: keep-alive` comments while a slow tool is still running
+ * and closes with a single `event: message` event, so anything that is not a
+ * `data:` line is protocol noise here.
+ *
+ * @param response - the `fetch` response whose body is an event stream.
+ * @param onMessage - callback receiving each parsed JSON-RPC message.
+ */
+async function readEventStream(response, onMessage) {
+  if (!response.body) return
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let data = []
+  const dispatch = () => {
+    if (data.length === 0) return
+    const text = data.join('\n')
+    data = []
+    let payload
+    try {
+      payload = JSON.parse(text)
+    } catch {
+      log('discarding a non-JSON event-stream message')
+      return
+    }
+    onMessage(payload)
+  }
+  const handleLine = (line) => {
+    if (line === '') return dispatch()
+    if (line.startsWith(':')) return undefined
+    const colon = line.indexOf(':')
+    const field = colon === -1 ? line : line.slice(0, colon)
+    const value = colon === -1 ? '' : line.slice(colon + 1).replace(/^ /, '')
+    if (field === 'data') data.push(value)
+    return undefined
+  }
+  for await (const chunk of response.body) {
+    buffer += decoder.decode(chunk, { stream: true })
+    let index
+    while ((index = buffer.indexOf('\n')) !== -1) {
+      handleLine(buffer.slice(0, index).replace(/\r$/, ''))
+      buffer = buffer.slice(index + 1)
+    }
+  }
+  buffer += decoder.decode()
+  if (buffer) handleLine(buffer.replace(/\r$/, ''))
+  dispatch()
+}
+
 /** Build the JSON-RPC error used when the DSH endpoint cannot be reached. */
 function unreachableError(id, detail) {
   return {
@@ -129,9 +186,8 @@ function unreachableError(id, detail) {
 async function forward(message) {
   const id = message?.id
   const isRequest = id !== undefined && id !== null
-  if (!endpoint.url || !endpoint.token) {
-    endpoint = resolveEndpoint()
-  }
+  // Re-resolve every time: a restarted Harness listens on a new port.
+  endpoint = resolveEndpoint()
   if (!endpoint.url) {
     log(`no endpoint; expected ${endpointFile} or DSH_MCP_URL`)
     if (isRequest) writeMessage(unreachableError(id, 'no endpoint is configured'))
@@ -154,6 +210,15 @@ async function forward(message) {
       signal: controller.signal,
     })
     if (response.status === 202 || isRequest === false) return
+    const contentType = String(response.headers.get('content-type') ?? '').toLowerCase()
+    if (contentType.includes('text/event-stream')) {
+      // The endpoint streams a slow call's reply: keep-alive comments while the
+      // tool runs, then the JSON-RPC response as one `message` event.
+      await readEventStream(response, (payload) => {
+        if (isRequest) writeMessage(payload)
+      })
+      return
+    }
     const text = await response.text()
     if (!response.ok && !text.trim()) {
       if (isRequest) writeMessage(unreachableError(id, `HTTP ${response.status}`))

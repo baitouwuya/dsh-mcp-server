@@ -104,10 +104,18 @@ only, never authentication: every token holder may name itself.
 
 This endpoint is stateless: it never returns `Mcp-Session-Id`, never requires one, and accepts a
 client-chosen session header while ignoring it. A request before `initialize` is served normally, and
-there is no server-initiated SSE stream — `GET` and `DELETE` answer 405 with
+there is no stream independent of a request — `GET` and `DELETE` answer 405 with
 `allow: POST, OPTIONS`, while `OPTIONS` answers 204. One POST carries one JSON-RPC message (batches are refused
-with `-32600`), and the reply is `application/json`. The body ceiling is 8 MiB by default and
-`maxBodyBytes` clamps it to 1 KiB–64 MiB; an oversized body is 413 with `-32700`.
+with `-32600`), and the reply takes one of two forms. A call that finishes within 10 s — or one from a
+client whose `Accept` names no `text/event-stream` — answers with a single `application/json` body. A call
+still running after that switches to `text/event-stream`: the status line and headers go out at once, an
+SSE comment (`: keep-alive`) follows every 15 s, and the JSON-RPC response closes the stream as its one
+`message` event. The second form exists because the first sends no bytes at all until the tool returns,
+and clients built on undici (Node's `fetch`, so the stdio bridge, Claude Code, Codex) abandon a request
+whose response headers have not arrived within `headersTimeout`, 300 s by default. That is what a long
+`dsh_wait_session` used to hit: the wait outlived the client's header timeout, the client reported
+`fetch failed`, and `dsh_read_session` — answering in milliseconds — kept working. The body ceiling is
+8 MiB by default and `maxBodyBytes` clamps it to 1 KiB–64 MiB; an oversized body is 413 with `-32700`.
 
 Envelope validation is structural: an object with a string `method`. The `jsonrpc` member is not
 re-validated, so a message that omits it, or spells `1.0`, is still dispatched — while every response
@@ -115,7 +123,10 @@ declares `2.0`. The protocol layer does not reject unknown `params` members; eac
 fields it uses.
 
 The stdio bridge adds one code of its own: `-32000` when it cannot reach the HTTP endpoint. That error
-comes from the bridge, not from this gateway.
+comes from the bridge, not from this gateway. The bridge reads both reply forms — a JSON body, and the
+event stream a slow call produces — and it re-reads `$DSH_HOME/mcp/dsh-mcp-endpoint.json` before every
+request, so a Harness that restarted on a new port is picked up without restarting the harness that
+launched the bridge.
 
 ## Not supported
 
@@ -124,5 +135,7 @@ comes from the bridge, not from this gateway.
 - `completion/complete`: argument completion is not implemented.
 - `resources/subscribe` and `resources/unsubscribe`: `subscribe` is advertised as false.
 - `notifications/tools/list_changed` and `notifications/resources/list_changed`: never emitted.
-- SSE resumption over `GET` and explicit session termination over `DELETE`: not implemented; both are 405.
+- SSE resumption over `GET`, any stream not tied to a request, and explicit session termination over
+  `DELETE`: not implemented; both verbs are 405. The event stream this server does use is always a reply to
+  one POST.
 - JSON-RPC batches and query-string bearer tokens: refused.
