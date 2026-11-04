@@ -107,6 +107,17 @@ export function makeServices() {
     { value: 'workspace-write', name: 'Workspace write', description: 'Write inside the workspace; wider retries need approval.' },
     { value: 'danger-full-access', name: 'Full access', description: 'Full file access without approval prompts.' },
   ]
+  /**
+   * The reserved experimental preset DSH 0.2.2 can compose: per-call review in a
+   * full-access sandbox. It is not a configured preset — it exists only while
+   * its integration is live, and `resolve` throws when it is not, exactly as
+   * the Host's own service does.
+   */
+  const autoOption = { value: 'auto', name: 'auto', description: 'Review each call (experimental)' }
+  const autoSpec = { sandbox: 'danger-full-access', approval: 'ask' }
+  let liveAuto = false
+  /** The catalog one deployment exposes right now. */
+  const catalogOptions = () => (liveAuto ? [...permissionOptions, autoOption] : permissionOptions)
   /** The knob bundle behind each preset name, as the real service's `resolve` returns it. */
   const presetTable = {
     'read-only': { sandbox: 'read-only', approval: 'never' },
@@ -121,16 +132,20 @@ export function makeServices() {
   const registeredTools = []
   const configEdits = []
   const permissionPresets = {
-    catalog: () => ({ defaultPreset: 'workspace-write', defaultOptions: permissionOptions, options: permissionOptions }),
+    catalog: () => ({ defaultPreset: 'workspace-write', defaultOptions: catalogOptions(), options: catalogOptions() }),
     resolve(name) {
+      if (name === 'auto') {
+        if (!liveAuto) throw new Error('permission: unknown preset "auto" (the review integration is not composed)')
+        return { name, ...autoSpec }
+      }
       const spec = presetTable[name]
       if (!spec) throw new Error(`permission: unknown preset "${name}"`)
       return { name, ...spec }
     },
     current: () => callerPreset,
     set(session, name) {
-      if (!permissionOptions.some((option) => option.value === name)) {
-        throw new Error(`permission: unknown preset "${name}" (known: ${permissionOptions.map((option) => option.value).join(', ')})`)
+      if (!catalogOptions().some((option) => option.value === name)) {
+        throw new Error(`permission: unknown preset "${name}" (known: ${catalogOptions().map((option) => option.value).join(', ')})`)
       }
       appliedPermissions.push({ session, name })
       // Mirror the durable event the real service appends, so the transcript
@@ -490,6 +505,7 @@ export function makeServices() {
     configEdits: () => [...configEdits],
     setCallerMode: (mode) => { callerMode = mode },
     setCallerPreset: (preset) => { callerPreset = preset },
+    setLiveAuto: (value) => { liveAuto = value === true },
   }
 }
 /** Listen on a throwaway port and route through whatever the plugin registered at call time. */

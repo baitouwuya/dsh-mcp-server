@@ -3,6 +3,30 @@
 Notable changes to `dsh-mcp-btwy`. Older releases are listed on
 [GitHub Releases](https://github.com/baitouwuya/dsh-mcp-server/releases).
 
+## [1.0.3] - 2026-11-05
+
+### Changed
+
+- Re-validated against **DSH 0.2.2-rc.1** (Cordis 4.1.0): 263 offline checks, 46 live MCP checks, 4 stdio bridge
+  checks. Nothing in the upgrade required a code change — the composer still accepts this package's `dsh.client`
+  declaration (`dsh_status.clientPage.inGraph` is `true`), the composition primitives (`ctx.effect`,
+  `ctx.inject`, `ctx.on`, `ctx.webServer.register`) and the `agents` / `sessionController` / `sessionQuery` /
+  `permissionPresets` / `commands` / `workspaceRegistry` services kept their contracts, and both official MCP
+  SDK builds (bundled 2.2.0 and current 2.4.0) handshake against the live endpoint.
+- Understands DSH 0.2.2's permission vocabulary. The new reserved `auto` preset (per-call review in a
+  `danger-full-access` sandbox, present only while its integration is composed) is clamped by the sandbox it
+  grants rather than by its name, and a session an internal caller starts no longer risks inheriting it as the
+  "widest preset at this rung". `custom` — the derived reading when a session's knobs match no preset — is
+  never granted as a name.
+
+### Notes
+
+- `DSH_MCP_URL` is published into the Host process, not into model-facing shells: DSH's `dsh-shell-env` builds a
+  curated `DSH_*` namespace per shell call, so only a `!!js` patch expression (or anything else running
+  in-process) sees the URL.
+- `dsh_list_permission_presets` reports whatever the deployment composes, so a Host with the review integration
+  live lists four presets instead of three.
+
 ## [1.0.2] - 2026-10-30
 
 ### Fixed

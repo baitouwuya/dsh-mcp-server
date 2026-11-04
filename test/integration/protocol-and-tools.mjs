@@ -25,6 +25,7 @@ const {
   currentId,
   setCallerMode,
   setCallerPreset,
+  setLiveAuto,
 } = h
 const { call, rpc, check } = h
 
@@ -243,6 +244,47 @@ try {
     .then(() => undefined, (error) => error)
   await check('the ceiling applies to a natively opened tool exactly as to a dispatched one', () => {
     assert.match(String(nativeRefusal && nativeRefusal.message), /wider than the calling DSH agent/)
+  })
+
+  // --- DSH 0.2.2: the reserved `auto` preset and the derived `custom` state ------
+  // DSH 0.2.2 can compose an experimental per-call review preset named `auto`.
+  // It is not a configured preset: it exists only while its integration is live,
+  // its sandbox is danger-full-access, and `resolve` throws once it is gone. The
+  // ceiling must judge it by the sandbox it grants, never by its name.
+  setLiveAuto(true)
+  setCallerMode('workspace-write')
+  setCallerPreset('workspace-write')
+  const composedCatalog = await call('dsh_list_permission_presets', {})
+  await check('a composed reserved preset joins the catalog this endpoint reports', () => {
+    assert.deepEqual(composedCatalog.presets.map((option) => option.value), ['read-only', 'workspace-write', 'danger-full-access', 'auto'])
+  })
+
+  const autoRefusal = await refusedBy('dsh_run_prompt', { prompt: 'reviewed', cwd: '/tmp', permissionPreset: 'auto' })
+  await check('the review preset is clamped by the sandbox it grants, not by its name', () => {
+    assert.ok(autoRefusal, 'a full-access review preset is wider than a workspace-write caller')
+    assert.match(String(autoRefusal.message), /wider than the calling DSH agent/)
+  })
+
+  setCallerMode('danger-full-access')
+  setCallerPreset('danger-full-access')
+  const autoGranted = await dispatch('dsh_run_prompt', { prompt: 'reviewed', cwd: '/tmp', permissionPreset: 'auto' })
+  await check('a caller at the top rung may hand the review preset on', () => {
+    assert.equal(autoGranted.permissionPreset, 'auto')
+  })
+
+  setLiveAuto(false)
+  const autoUnavailable = await refusedBy('dsh_run_prompt', { prompt: 'reviewed', cwd: '/tmp', permissionPreset: 'auto' })
+  await check('without its integration the reserved name is refused, naming what is available', () => {
+    assert.ok(autoUnavailable, 'an unresolvable preset must be refused, not assumed')
+    assert.match(String(autoUnavailable.message), /no sandbox mode this Host can read/)
+    assert.match(String(autoUnavailable.message), /Available presets: read-only, workspace-write, danger-full-access/)
+  })
+
+  setCallerMode('danger-full-access')
+  setCallerPreset('custom')
+  const customCallerRun = await dispatch('dsh_run_prompt', { prompt: 'custom caller', cwd: '/tmp' })
+  await check('a caller whose knobs match no preset still pins a concrete one', () => {
+    assert.equal(customCallerRun.permissionPreset, 'danger-full-access', 'derived "custom" is never granted as a name')
   })
 
   // --- lossless canonical values ------------------------------------------------

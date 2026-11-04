@@ -84,6 +84,9 @@ An internal caller is attributed and clamped, never trusted:
   `dsh_run_prompt`/`dsh_continue_session`, and `/permission <preset>` on `dsh_run_command`, are
   refused when the preset's sandbox is wider than the caller's current mode
   (`read-only` < `workspace-write` < `danger-full-access`). Narrower or equal presets are allowed.
+  The ladder judges a preset by the sandbox it grants, not by its name: 0.2.2's reserved `auto` — per-call
+  review in a `danger-full-access` sandbox, present only while its integration is composed — is treated as
+  that widest rung, and `custom` (the reading when a session's knobs match no preset) is never a grant.
 - **A session an internal caller starts is pinned to its own rung.** With no explicit preset the new
   session gets the caller's own preset, or the widest configured preset at the caller's mode — never
   the deployment default, which could be wider than the caller.
@@ -103,7 +106,7 @@ made from inside DSH. The Harness GUI remains an answerer in every race.
 
 ## Connecting DSH's own MCP client
 
-DSH 0.2.1-rc.5 ships its own MCP client, so besides the built-in front door above, the Harness can
+DSH 0.2.2-rc.1 ships its own MCP client, so besides the built-in front door above, the Harness can
 connect to this endpoint like any other MCP server. Its tools then appear in the session as
 `mcp__<serverName>__<name>`:
 
