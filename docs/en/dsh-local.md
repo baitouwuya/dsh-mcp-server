@@ -99,6 +99,10 @@ fixed height (fading at the edge) behind "Show all (N lines)", which turns into 
 Harness's own `UserMessageBubble` and `MarkdownText`, so a delivered message looks like the messages around it
 (plain text when Markdown rendering fails).
 
+The Plugins page offers "How internal messages appear": **bubble** (the default) or **wake card**, the Harness
+card it otherwise becomes. It lives on the `dsh-mcp-server` row as `internalMessageStyle` (`bubble` | `card`),
+is validated like every other setting, and reloads this half when saved.
+
 ## The authority ceiling
 
 An internal caller is attributed and clamped, never trusted:

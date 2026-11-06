@@ -21,6 +21,9 @@ Notable changes to `dsh-mcp-btwy`. Older releases are listed on
   key, lower priority) and renders `dsh-mcp-server` and `dsh-work-sync` deliveries the way the person reads them
   — right-aligned bubble, sending Session above it, one click to open it — while every other wake family keeps
   the shipped card, its clock and its disclosure.
+- The bubble is a switch, not a decree. The bundle page offers "内部消息的呈现": **气泡** (default) or **提醒卡片**,
+  the shipped wake card. It is stored on this row as `internalMessageStyle` (`bubble` | `card`), validated like
+  every other setting, and read once per activation — saving it reloads this half, so no stale value survives.
 - A delivered bubble reuses the Harness's own UI: `UserMessageBubble` for the chassis and `MarkdownText` for the
   body, both resolved from the primitives the page already seeds, with a plain-text fallback when Markdown
   rendering fails. A look-alike bubble that drifts from the theme is worse than no bubble.
@@ -34,7 +37,7 @@ Notable changes to `dsh-mcp-btwy`. Older releases are listed on
 
 - `dsh.client.inject` now lists `@deepseek-ai/dsh-client-ui-chat`, the module that declares the slot this entry
   renders into.
-- 276 offline checks (31 in the client half, thirteen of them new), 46 live MCP checks, 4 stdio bridge checks.
+- 277 offline checks (32 in the client half, fourteen of them new), 46 live MCP checks, 4 stdio bridge checks.
 
 ## [1.0.3] - 2026-11-05
 

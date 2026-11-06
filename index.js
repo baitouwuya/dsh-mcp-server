@@ -184,6 +184,14 @@ export function apply(ctx, config = {}) {
    * and `steer` pin one behaviour for every call. A caller's explicit `mode`
    * argument always wins.
    */
+  /** How a delivered message is drawn: a chat bubble (default) or the wake card. */
+  const internalMessageStyle = (() => {
+    const raw = config.internalMessageStyle
+    if (raw === undefined) return 'bubble'
+    if (raw === 'bubble' || raw === 'card') return raw
+    throw new Error(`dsh-mcp-server: "internalMessageStyle" must be "bubble" or "card" (got ${String(raw)}).`)
+  })()
+
   const busyMode = (() => {
     const raw = config.busyMode
     if (raw === undefined || raw === null || raw === '') return 'setting'
@@ -594,6 +602,7 @@ export function apply(ctx, config = {}) {
       answerApprovals,
       answerQuestions,
       busyMode,
+      internalMessageStyle,
       syncOnStart: syncOnStartValue(),
       syncRowId: syncEntryId,
       sync: workSyncStatus(),

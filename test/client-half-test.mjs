@@ -130,7 +130,7 @@ const renderAll = (node) => {
   return { ...node, children: (node.children ?? []).map(renderAll) }
 }
 const labels = collectText(renderAll(panelPage({ view: 'page' })))
-for (const expected of ['Surface', 'On demand', 'All at once', 'Sidebar projects', 'Join an existing project', 'May create projects', 'Delivery while busy', 'Follow the setting', 'Queue', 'Steer', 'Sync progress when a task starts', 'Approvals', 'Questions']) {
+for (const expected of ['Surface', 'On demand', 'All at once', 'Sidebar projects', 'Join an existing project', 'May create projects', 'Delivery while busy', 'Follow the setting', 'Queue', 'Steer', 'How internal messages appear', 'Bubble', 'Wake card', 'Sync progress when a task starts', 'Approvals', 'Questions']) {
   assert.ok(labels.includes(expected), `the settings page must offer "${expected}"`)
 }
 checks.push('the settings page renders every control it offers')
@@ -166,6 +166,8 @@ assert.match(panelCopy, /21 tools/, 'the page names the real published count')
 checks.push('the page copy matches the twenty-one published tools')
 
 assert.match(validateConfigPatch({ exposeToDsh: true, typo: 1 }).error, /Unknown field/, 'unknown fields are refused, not ignored')
+assert.equal(validateConfigPatch({ internalMessageStyle: 'card' }).patch.internalMessageStyle, 'card', 'the transcript style is a validated field')
+assert.match(validateConfigPatch({ internalMessageStyle: 'fancy' }).error, /bubble.*card/, 'any other value is refused')
 checks.push('the configuration validator refuses unknown fields')
 
 // --- the switch's read/write contract ----------------------------------------
@@ -300,6 +302,12 @@ assert.ok(chassis, 'the bubble itself is the Harness component, not a look-alike
 const syncBubble = exported.buildTriggerCard({ node: { data: { source: { kind: 'dsh-work-sync', sessionId: 's1' }, content: [{ type: 'text', text: '【进度同步】…' }], time: Date.now() } }, t: cardZh, getList: () => cardList }, cardList)
 assert.equal(syncBubble.props['data-dsh-mcp-bubble'], 's1', 'a progress-sync notice is a bubble too')
 checks.push('a message this endpoint delivered renders as a bubble with its sender above')
+
+// The switch puts the shipped wake card back, for a reader who prefers it.
+const asCard = exported.buildTriggerCard({ node: { data: { source: { kind: 'dsh-mcp-server', sessionId: 's1' }, content: [{ type: 'text', text: 'x' }], time: Date.now() } }, t: cardZh, getList: () => cardList }, cardList, 'card')
+assert.equal(asCard.props['data-dsh-mcp-trigger'], 's1', 'the card style renders the wake card again')
+assert.equal(asCard.props['data-dsh-mcp-bubble'], undefined, 'and no bubble')
+checks.push('the transcript style switch puts the wake card back')
 
 // The title is the affordance the reader clicks; the chevron is the disclosure.
 const finder = (node, type, found = []) => {
