@@ -95,7 +95,9 @@ A turn no person started is drawn by default as a wake card rather than a bubble
 deliveries render as messages — a right-aligned bubble with "From \"<session>\" · <kind>" above it, one click to
 open that Session — while every other wake family (schedules, goals, webhooks, background jobs) keeps the
 shipped card with its clock and its disclosure. A delivery longer than 12 lines or 700 characters folds to a
-fixed height (fading at the edge) behind "Show all (N lines)", which turns into "Show less" once opened.
+fixed height (fading at the edge) behind "Show all (N lines)", which turns into "Show less" once opened. The chassis and the body reuse the
+Harness's own `UserMessageBubble` and `MarkdownText`, so a delivered message looks like the messages around it
+(plain text when Markdown rendering fails).
 
 ## The authority ceiling
 

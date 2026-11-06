@@ -21,6 +21,9 @@ Notable changes to `dsh-mcp-btwy`. Older releases are listed on
   key, lower priority) and renders `dsh-mcp-server` and `dsh-work-sync` deliveries the way the person reads them
   — right-aligned bubble, sending Session above it, one click to open it — while every other wake family keeps
   the shipped card, its clock and its disclosure.
+- A delivered bubble reuses the Harness's own UI: `UserMessageBubble` for the chassis and `MarkdownText` for the
+  body, both resolved from the primitives the page already seeds, with a plain-text fallback when Markdown
+  rendering fails. A look-alike bubble that drifts from the theme is worse than no bubble.
 - A delivered bubble folds itself when it is long. A prompt handed to a session can run to many screens and used to
   push every following turn out of view: past 12 lines or 700 characters the bubble clamps to a fixed height
   (fading at the edge) behind "Show all (N lines)", which expands it and folds it back.

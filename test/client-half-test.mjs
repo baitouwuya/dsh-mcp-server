@@ -28,6 +28,12 @@ checks.push('the client half registers under this package name')
 /** A React just real enough to build elements and hold hook state. */
 const React = {
   createElement: (type, props, ...children) => ({ type, props: { ...(props ?? {}), ...(children.length ? { children } : {}) }, children }),
+  Component: class Component {
+    constructor(props) {
+      this.props = props ?? {}
+      this.state = {}
+    }
+  },
   useState: (value) => [value, () => {}],
   useEffect: () => {},
   useCallback: (callback) => callback,
@@ -39,6 +45,10 @@ const uiMock = {
   SegmentedControl: (props) => ({ type: 'div', props: { role: 'tablist', 'aria-label': props.label }, children: (props.options || []).map((option) => ({ type: 'button', props: { 'aria-pressed': option.value === props.value ? 'true' : 'false', disabled: props.disabled }, children: [option.label] })) }),
   Pill: (props) => ({ type: props.onClick ? 'button' : 'span', props: { 'aria-pressed': props.active ? 'true' : 'false', disabled: props.disabled }, children: [props.children] }),
   Button: (props) => ({ type: 'button', props: { onClick: props.onClick }, children: [props.children] }),
+  // The Harness bubble chassis and Markdown renderer, as the module finds them
+  // in a real page: a delivered message reuses both instead of a look-alike.
+  UserMessageBubble: (props) => ({ type: 'div', props: { ...props, 'data-bubble': 'harness' }, children: props.children === undefined ? [] : [].concat(props.children) }),
+  MarkdownText: (props) => ({ type: 'div', props: { 'data-markdown': String(props.text) }, children: [props.text] }),
 }
 const required = []
 const exported = spec.factory((name) => {
@@ -92,6 +102,7 @@ checks.push('the row page renders a summary string and the configuration panel')
 // every switch as "on", which is what makes the optional controls render.
 const renderingReact = {
   createElement: React.createElement,
+  Component: React.Component,
   useState: (value) => [value === undefined ? true : value, () => {}],
   useEffect: () => {},
   useCallback: (callback) => callback,
@@ -274,7 +285,18 @@ const cardList = { byId: { s1: { displayTitle: 'MCP 插件开发' } } }
 const named = exported.buildTriggerCard({ node: { data: { source: { kind: 'dsh-mcp-server', sessionId: 's1' }, content: [{ type: 'text', text: '只回复一句：内部来源测试 OK。' }], time: Date.parse('2026-11-06T10:17:39Z') } }, t: cardZh, getList: () => cardList }, cardList)
 assert.equal(named.props['data-dsh-mcp-bubble'], 's1', 'a delivered prompt renders as a bubble, not a card')
 assert.match(collectText(named).join(' '), /来自「MCP 插件开发」 · MCP 消息/, 'the header names the sender and the delivery')
-assert.match(collectText(named).join(' '), /内部来源测试 OK/, 'and the message itself is in the bubble')
+const track = (node, out = []) => {
+  if (node === null || typeof node !== 'object') return out
+  if (Array.isArray(node)) { for (const child of node) track(child, out); return out }
+  out.push(node)
+  for (const child of node.props?.children ?? []) track(child, out)
+  return out
+}
+const mdNode = track(named).find((node) => node.type === uiMock.MarkdownText)
+assert.ok(mdNode, 'the text goes through the Harness Markdown renderer')
+assert.match(String(mdNode.props.text), /内部来源测试 OK/, 'and it is the delivered text')
+const chassis = track(named).find((node) => node.type === uiMock.UserMessageBubble)
+assert.ok(chassis, 'the bubble itself is the Harness component, not a look-alike')
 const syncBubble = exported.buildTriggerCard({ node: { data: { source: { kind: 'dsh-work-sync', sessionId: 's1' }, content: [{ type: 'text', text: '【进度同步】…' }], time: Date.now() } }, t: cardZh, getList: () => cardList }, cardList)
 assert.equal(syncBubble.props['data-dsh-mcp-bubble'], 's1', 'a progress-sync notice is a bubble too')
 checks.push('a message this endpoint delivered renders as a bubble with its sender above')
