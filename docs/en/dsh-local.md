@@ -90,10 +90,11 @@ opens that Session in the main view. While the sending Session is not loaded yet
 is not a button. A message the person typed — and a delivery made for an external MCP client, which names no
 Session — renders no line at all.
 
-A turn no person started is drawn as a wake card rather than a bubble. This plugin shadows the `turn-trigger`
-cell of `conversation.chat.node` at a lower priority and redraws the same card: the title becomes
-"From \"<session>\" · <kind>", clicking it opens that Session, and the chevron on the right still discloses the
-body.
+A turn no person started is drawn by default as a wake card rather than a bubble. This plugin shadows the
+`turn-trigger` cell of `conversation.chat.node` at a lower priority: `dsh-mcp-server` and `dsh-work-sync`
+deliveries render as messages — a right-aligned bubble with "From \"<session>\" · <kind>" above it, one click to
+open that Session — while every other wake family (schedules, goals, webhooks, background jobs) keeps the
+shipped card with its clock and its disclosure.
 
 ## The authority ceiling
 

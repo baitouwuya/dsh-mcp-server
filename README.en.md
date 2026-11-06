@@ -40,10 +40,10 @@ other harness ──MCP (Streamable HTTP or stdio)──> DSH MCP Server ──>
   session answers; the question gets an id, reminders ride the target's own calls (never a wake-up), and a
   human stop settles it without waking anyone.
 - **An internal message says who sent it.** A message another Session delivered — a prompt this package handed
-  over, a work-sync notice or report, or one of the Harness's own agent/team relays — names its sender: the wake
-  card that would read "a request started this turn" titles itself "From \"<session>\" · MCP message" and opens
-  that Session on click, and a message that renders as an ordinary bubble gets the same line above it. A message
-  the person typed is untouched.
+  over, a work-sync notice or report, or one of the Harness's own agent/team relays — carries a line above the
+  bubble naming the sending Session and the kind of delivery; one click opens that Session. What this package
+  delivers is a **bubble**, not a "a request started this turn" wake card, and a message the person typed has no
+  such line.
 - **Keep same-workspace peers from colliding.** Task-start progress sync asks other top-level agents in the
   same workspace what they are doing and which files they are touching, as its own `dsh-work-sync` row.
 - **Call the same tools from inside DSH.** The default lazy surface is a three-tool front door

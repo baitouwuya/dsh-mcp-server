@@ -266,11 +266,16 @@ const cardZh = (key) => ({
   triggerSchedule: '本轮由定时任务唤醒',
 }[key] ?? key)
 const cardList = { byId: { s1: { displayTitle: 'MCP 插件开发' } } }
+// A delivery from this endpoint is a message, not a wake: it renders as a bubble
+// on the right, with the sender above it, exactly like the ChatGPT-style header
+// the person asked for.
 const named = exported.buildTriggerCard({ node: { data: { source: { kind: 'dsh-mcp-server', sessionId: 's1' }, content: [{ type: 'text', text: '只回复一句：内部来源测试 OK。' }], time: Date.parse('2026-11-06T10:17:39Z') } }, t: cardZh, getList: () => cardList }, cardList)
-assert.equal(named.props['data-dsh-mcp-trigger'], 's1', 'the card carries the sending Session')
-assert.match(collectText(named).join(' '), /来自「MCP 插件开发」 · MCP 消息/, 'the title names the sender and the delivery')
-assert.equal(named.props['data-dsh-mcp-trigger'] === 'generic', false)
-checks.push('the wake card title names the sending Session')
+assert.equal(named.props['data-dsh-mcp-bubble'], 's1', 'a delivered prompt renders as a bubble, not a card')
+assert.match(collectText(named).join(' '), /来自「MCP 插件开发」 · MCP 消息/, 'the header names the sender and the delivery')
+assert.match(collectText(named).join(' '), /内部来源测试 OK/, 'and the message itself is in the bubble')
+const syncBubble = exported.buildTriggerCard({ node: { data: { source: { kind: 'dsh-work-sync', sessionId: 's1' }, content: [{ type: 'text', text: '【进度同步】…' }], time: Date.now() } }, t: cardZh, getList: () => cardList }, cardList)
+assert.equal(syncBubble.props['data-dsh-mcp-bubble'], 's1', 'a progress-sync notice is a bubble too')
+checks.push('a message this endpoint delivered renders as a bubble with its sender above')
 
 // The title is the affordance the reader clicks; the chevron is the disclosure.
 const finder = (node, type, found = []) => {
@@ -283,22 +288,22 @@ const finder = (node, type, found = []) => {
 }
 const openedCard = []
 const clickableCard = exported.buildTriggerCard({ node: { data: { source: { kind: 'dsh-work-sync', sessionId: 's1' }, content: [{ type: 'text', text: 'ping' }], time: Date.now() } }, t: cardZh, getList: () => cardList, openSession: (id) => openedCard.push(id) }, cardList)
-const titleButton = finder(clickableCard, 'button').find((button) => String(button.props.className).includes('dsh-mcp-trigger-title'))
-assert.ok(titleButton, 'the sender title is its own control')
+const titleButton = finder(clickableCard, 'button').find((button) => button.props['data-dsh-mcp-origin'] === 's1')
+assert.ok(titleButton, 'the bubble header is its own control')
 titleButton.props.onClick()
-assert.deepEqual(openedCard, ['s1'], 'clicking the title opens the sending Session, without expanding the card')
-checks.push('clicking the wake card title opens the sending Session')
+assert.deepEqual(openedCard, ['s1'], 'clicking the header opens the sending Session')
+checks.push('clicking the bubble header opens the sending Session')
 
 const generic = exported.buildTriggerCard({ node: { data: { source: { kind: 'schedule' }, content: [{ type: 'text', text: 'nightly' }], time: Date.now() } }, t: cardZh, getList: () => ({ byId: {} }) }, { byId: {} })
 assert.equal(generic.props['data-dsh-mcp-trigger'], 'generic', 'a wake with no sender keeps the shipped generic title')
 assert.match(collectText(generic).join(' '), /本轮由定时任务唤醒/, 'a known wake family keeps its own title')
 checks.push('a wake that names no Session keeps the generic card')
 
-const openCard = exported.buildTriggerCard({ node: { data: { source: { kind: 'dsh-work-sync', sessionId: 's1' }, content: [{ type: 'text', text: '【进度同步】…' }], time: Date.now() } }, t: cardZh, getList: () => cardList, open: true }, cardList)
+const openCard = exported.buildTriggerCard({ node: { data: { source: { kind: 'schedule' }, content: [{ type: 'text', text: 'nightly build' }], time: Date.now() } }, t: cardZh, getList: () => ({ byId: {} }), open: true }, { byId: {} })
 assert.match(collectText(openCard).join(' '), /这条通知触发了本轮回复。/, 'the opened card explains what it is')
-assert.match(collectText(openCard).join(' '), /【进度同步】/, 'and shows the delivered text')
-const closed = exported.buildTriggerCard({ node: { data: { source: { kind: 'dsh-work-sync', sessionId: 's1' }, content: [{ type: 'text', text: '【进度同步】…' }], time: Date.now() } }, t: cardZh, getList: () => cardList }, cardList)
-assert.equal(collectText(closed).join(' ').includes('【进度同步】'), false, 'a closed card keeps the body out of the flow')
+assert.match(collectText(openCard).join(' '), /nightly build/, 'and shows the delivered text')
+const closed = exported.buildTriggerCard({ node: { data: { source: { kind: 'schedule' }, content: [{ type: 'text', text: 'nightly build' }], time: Date.now() } }, t: cardZh, getList: () => ({ byId: {} }) }, { byId: {} })
+assert.equal(collectText(closed).join(' ').includes('nightly build'), false, 'a closed card keeps the body out of the flow')
 checks.push('the card keeps its disclosure: closed by default, text on open')
 
 // --- the origin line above a delivered message -------------------------------
