@@ -65,7 +65,7 @@ const ctx = {
 }
 exported.apply(ctx)
 
-assert.equal(registrations.length, 2, 'the client half registers the bundle page and the row page')
+assert.equal(registrations.length, 3, 'the client half registers the bundle page, the row page and the origin line')
 const page = registrations.find((entry) => entry.options.name === 'plugins.row.config')
 const bundle = registrations.find((entry) => entry.options.name === 'plugins.bundle.config')
 assert.ok(page, 'the row page entry is registered')
@@ -244,6 +244,57 @@ assert.equal(raised.status, 400, 'a raised ceiling lets the same body reach vali
 assert.match(String((await raised.json()).error), /session id/, 'it is refused for its content, not its size')
 await new Promise((resolve) => raisedServer.close(resolve))
 checks.push('a raised configMaxBodyBytes reaches the route option and changes the ceiling')
+
+
+// --- the origin line above a delivered message -------------------------------
+// Every internal message carries a durable source naming who sent it; the Chat
+// shows only the body, so a work-sync notice or a relayed report reads as if the
+// user typed it. This entry puts the sender back above the bubble.
+const originEntry = registrations.find((entry) => entry.options.name === 'conversation.chat.user.before')
+assert.ok(originEntry, 'the origin line registers into the Chat user-row chain slot')
+assert.equal(originEntry.options.locale, 'dshMcpServer')
+assert.equal(typeof originEntry.options.select, 'function', 'a chain slot entry must carry a selector')
+assert.equal(originEntry.options.select({ source: null }), null, 'an ordinary prompt claims nothing')
+assert.equal(originEntry.options.select({ source: { kind: 'user', rpcId: 'r1' } }), null, 'a typed message claims nothing')
+assert.equal(originEntry.options.select({ source: { kind: 'dsh-mcp-server' } }), null, 'an external MCP delivery names no Session')
+assert.notEqual(originEntry.options.select({ source: { kind: 'dsh-work-sync', sessionId: 's1' } }), null, 'a work-sync notice is claimed')
+checks.push('the origin line claims only messages that name a sending Session')
+
+assert.deepEqual(exported.originOf({ kind: 'dsh-work-sync', sessionId: 's1', agentId: 'a1' }), { sessionId: 's1', kindKey: 'originSync' }, 'a work-sync notice names its asking Session')
+assert.deepEqual(exported.originOf({ kind: 'dsh-mcp-server', sessionId: 's2' }), { sessionId: 's2', kindKey: 'originMcp' }, 'a prompted session names its caller')
+assert.deepEqual(exported.originOf({ kind: 'agent-message', form: 'relay', senderSessionId: 's3' }), { sessionId: 's3', kindKey: 'originAgent' }, 'a Harness relay names the agent that sent it')
+assert.equal(exported.originOf({ kind: 'dsh-mcp-server' }), null, 'a delivery from an external client names nothing')
+assert.equal(exported.originOf(null), null)
+assert.equal(exported.originOf('dsh-work-sync'), null)
+checks.push('the origin reads both source shapes: source.sessionId and source.senderSessionId')
+
+const titled = exported.sessionTitle({ byId: { s1: { displayTitle: '重构 work-sync' } } }, 's1')
+assert.deepEqual(titled, { title: '重构 work-sync', known: true }, 'the header shows the Session title')
+assert.deepEqual(exported.sessionTitle({ byId: { s1: { projectionValues: { subagent: { label: 'review-mcp-103' } } } } }, 's1'), { title: 'review-mcp-103', known: true }, 'a subagent falls back to its label')
+assert.deepEqual(exported.sessionTitle({ byId: {} }, 'abcdef123456'), { title: 'abcdef12…', known: false }, 'an unloaded row shows a short id')
+checks.push('the header resolves a title, a subagent label, or a short id')
+
+const tZh = (key) => ({ originFrom: '来自「{name}」', originOpen: '打开来源会话', originSync: '进度同步', originAgent: '智能体消息' }[key] ?? key)
+const known = exported.buildOriginLine({ source: { kind: 'dsh-work-sync', sessionId: 's1' }, t: tZh, openSession: () => {} }, { byId: { s1: { displayTitle: 'sync-engine' } } })
+assert.equal(known.type, 'button', 'a known sender renders a button')
+assert.equal(known.props['data-dsh-mcp-origin'], 's1')
+assert.equal(collectText(known).join(''), '来自「sync-engine」·进度同步')
+assert.equal(known.props.title, '打开来源会话')
+checks.push('the header names the sender and the kind of delivery')
+
+const opened = []
+const clickable = exported.buildOriginLine({ source: { kind: 'dsh-mcp-server', sessionId: 's2' }, t: tZh, openSession: (id) => opened.push(id) }, { byId: { s2: { displayTitle: 'lead' } } })
+let stopped = 0
+clickable.props.onClick({ preventDefault: () => {}, stopPropagation: () => { stopped += 1 } })
+assert.deepEqual(opened, ['s2'], 'clicking opens the sending Session')
+assert.equal(stopped, 1, 'the click does not bubble into the bubble below')
+checks.push('clicking the header opens the sending Session')
+
+const unknown = exported.buildOriginLine({ source: { kind: 'agent-message', senderSessionId: 's3' }, t: tZh, openSession: () => assert.fail('must not open an unknown Session') }, { byId: {} })
+assert.equal(unknown.type, 'span', 'an unloaded Session is not a dead click target')
+assert.equal(collectText(unknown).join(''), '来自「s3」·智能体消息', 'the unknown row still says where it came from')
+assert.equal(exported.buildOriginLine({ source: { kind: 'user' }, t: tZh }, { byId: {} }), null, 'a typed message renders no header')
+checks.push('an unloaded sender still shows the short id, without a dead click')
 
 await new Promise((resolve) => server.close(resolve))
 console.log(`${checks.length} client half checks passed`)

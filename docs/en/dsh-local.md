@@ -73,6 +73,23 @@ Host's browser module registry answering whether this bundle's page is really be
 `inGraph: false` until a restart composes a newly added client half, which is the difference between
 "the page is missing" and "the page is not built yet".
 
+## Where an internal message came from
+
+Every message this plugin hands a session carries a durable `source`: a prompt from
+`dsh_continue_session` records `{ kind: 'dsh-mcp-server', sessionId: <calling session>, agentId }`, and a
+work-sync notice or report records `{ kind: 'dsh-work-sync', sessionId: <asking session> }`. The Harness's own
+relays (agent messages, team messages, a settling subagent) record the same thing on `source.senderSessionId`.
+
+The transcript renders only the body, so those rows read as if the person typed them. The Client half therefore
+registers one line in `conversation.chat.user.before` — inside the user row, above the bubble:
+
+> ✈ From "sync-engine" · progress sync
+
+The name is the Session list's `displayTitle`, then the subagent label, then an eight-character id; clicking it
+opens that Session in the main view. While the sending Session is not loaded yet the line shows the short id and
+is not a button. A message the person typed — and a delivery made for an external MCP client, which names no
+Session — renders no line at all.
+
 ## The authority ceiling
 
 An internal caller is attributed and clamped, never trusted:
@@ -136,4 +153,3 @@ assigned by the Harness at boot — not the historical `19387` — so do not har
 publishes the URL as the `DSH_MCP_URL` environment variable, which a patch expression can read; pin the
 Web port when the URL has to be known before the listener binds. The token is a local secret — keep it
 out of shared configuration and out of the repository.
-

@@ -3,6 +3,27 @@
 Notable changes to `dsh-mcp-btwy`. Older releases are listed on
 [GitHub Releases](https://github.com/baitouwuya/dsh-mcp-server/releases).
 
+## [1.0.4] - 2026-11-06
+
+### Added
+
+- **A delivered message says who sent it.** Every internal message this package hands a session already carried a
+  durable `source` naming the sender — a prompted session (`dsh-mcp-server`), a work-sync notice or report
+  (`dsh-work-sync`, whose `source.sessionId` is the asking session). The Chat renders only the body, so those
+  rows read as if the person typed them. The Client half now registers one line in
+  `conversation.chat.user.before` — above the bubble, inside the same right-aligned row — naming the sending
+  Session (`displayTitle`, then the subagent label, then a short id) and the kind of delivery; clicking it opens
+  that Session. The same line covers the Harness's own relays (`agent-message`, `team-message`,
+  `subagent-settled`, which name the sender on `source.senderSessionId`).
+- The chain entry carries a selector that declines every row naming no sender, so an ordinary prompt — and a
+  delivery made on behalf of an external MCP client, which has no Session id — renders exactly as before.
+
+### Changed
+
+- `dsh.client.inject` now lists `@deepseek-ai/dsh-client-ui-chat`, the module that declares the slot this entry
+  renders into.
+- 269 offline checks (24 in the client half, six of them new), 46 live MCP checks, 4 stdio bridge checks.
+
 ## [1.0.3] - 2026-11-05
 
 ### Changed
