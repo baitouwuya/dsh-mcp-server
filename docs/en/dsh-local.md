@@ -90,6 +90,11 @@ opens that Session in the main view. While the sending Session is not loaded yet
 is not a button. A message the person typed — and a delivery made for an external MCP client, which names no
 Session — renders no line at all.
 
+A turn no person started is drawn as a wake card rather than a bubble. This plugin shadows the `turn-trigger`
+cell of `conversation.chat.node` at a lower priority and redraws the same card: the title becomes
+"From \"<session>\" · <kind>", clicking it opens that Session, and the chevron on the right still discloses the
+body.
+
 ## The authority ceiling
 
 An internal caller is attributed and clamped, never trusted:

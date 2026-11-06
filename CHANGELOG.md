@@ -15,6 +15,11 @@ Notable changes to `dsh-mcp-btwy`. Older releases are listed on
   Session (`displayTitle`, then the subagent label, then a short id) and the kind of delivery; clicking it opens
   that Session. The same line covers the Harness's own relays (`agent-message`, `team-message`,
   `subagent-settled`, which name the sender on `source.senderSessionId`).
+- The wake card above a turn no person started now names the sender too. DSH renders that card for every waking
+  notification and picks its title from the source family; this endpoint's kinds had no entry, so the card read
+  "a request started this turn". The Client half shadows the `turn-trigger` cell (same key, lower priority) and
+  keeps the card, its disclosure and its clock, with the sending Session in the title — clicking the title opens
+  that Session, the chevron still discloses the body.
 - The chain entry carries a selector that declines every row naming no sender, so an ordinary prompt — and a
   delivery made on behalf of an external MCP client, which has no Session id — renders exactly as before.
 
@@ -22,7 +27,7 @@ Notable changes to `dsh-mcp-btwy`. Older releases are listed on
 
 - `dsh.client.inject` now lists `@deepseek-ai/dsh-client-ui-chat`, the module that declares the slot this entry
   renders into.
-- 269 offline checks (24 in the client half, six of them new), 46 live MCP checks, 4 stdio bridge checks.
+- 274 offline checks (29 in the client half, eleven of them new), 46 live MCP checks, 4 stdio bridge checks.
 
 ## [1.0.3] - 2026-11-05
 

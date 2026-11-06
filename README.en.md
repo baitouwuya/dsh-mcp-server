@@ -40,9 +40,10 @@ other harness ──MCP (Streamable HTTP or stdio)──> DSH MCP Server ──>
   session answers; the question gets an id, reminders ride the target's own calls (never a wake-up), and a
   human stop settles it without waking anyone.
 - **An internal message says who sent it.** A message another Session delivered — a prompt this package handed
-  over, a work-sync notice or report, or one of the Harness's own agent/team relays — carries a line above the
-  bubble naming the sending Session and the kind of delivery; one click opens that Session. A message the person
-  typed has no such line.
+  over, a work-sync notice or report, or one of the Harness's own agent/team relays — names its sender: the wake
+  card that would read "a request started this turn" titles itself "From \"<session>\" · MCP message" and opens
+  that Session on click, and a message that renders as an ordinary bubble gets the same line above it. A message
+  the person typed is untouched.
 - **Keep same-workspace peers from colliding.** Task-start progress sync asks other top-level agents in the
   same workspace what they are doing and which files they are touching, as its own `dsh-work-sync` row.
 - **Call the same tools from inside DSH.** The default lazy surface is a three-tool front door
@@ -132,7 +133,7 @@ The [docs index](docs/README.md) lists both languages.
 ## Status
 
 Version **1.0.4**, checked against **DSH 0.2.2-rc.1** (Cordis 4.1.0): 21 MCP tools, 2 resources, 1 resource
-template, 269 offline checks plus live HTTP and stdio suites. Host-only, zero dependencies, MIT.
+template, 274 offline checks plus live HTTP and stdio suites. Host-only, zero dependencies, MIT.
 DSH ships its own MCP client (0.2.1+, re-checked on 0.2.2-rc.1), so besides this plugin's built-in front door the Harness can
 connect to this endpoint directly — see
 [Connecting DSH's own MCP client](docs/en/dsh-local.md#connecting-dshs-own-mcp-client).
