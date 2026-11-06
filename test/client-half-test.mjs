@@ -264,6 +264,8 @@ const cardZh = (key) => ({
   triggerExplanation: '这条通知触发了本轮回复。',
   triggerRequest: '收到执行请求',
   triggerSchedule: '本轮由定时任务唤醒',
+  bubbleMore: '展开全部（{lines} 行）',
+  bubbleLess: '收起',
 }[key] ?? key)
 const cardList = { byId: { s1: { displayTitle: 'MCP 插件开发' } } }
 // A delivery from this endpoint is a message, not a wake: it renders as a bubble
@@ -293,6 +295,33 @@ assert.ok(titleButton, 'the bubble header is its own control')
 titleButton.props.onClick()
 assert.deepEqual(openedCard, ['s1'], 'clicking the header opens the sending Session')
 checks.push('clicking the bubble header opens the sending Session')
+
+// A long delivered prompt must not push the conversation off the screen: it
+// folds to a fixed height with the line count on the control that opens it.
+assert.equal(exported.foldInfo([{ type: 'text', text: 'short' }]).long, false, 'a short message does not fold')
+assert.equal(exported.foldInfo([{ type: 'text', text: Array.from({ length: 13 }, (_, i) => 'line ' + i).join('\n') }]).long, true, 'a message past the line cap folds')
+assert.equal(exported.foldInfo([{ type: 'text', text: 'x'.repeat(exported.BUBBLE_CLAMP_CHARS + 1) }]).long, true, 'one enormous line folds too')
+checks.push('a delivered message folds past a line or character cap')
+
+const longParts = [{ type: 'text', text: Array.from({ length: 30 }, (_, i) => '第 ' + (i + 1) + ' 行').join('\n') }]
+const longNode = { data: { source: { kind: 'dsh-mcp-server', sessionId: 's1' }, content: longParts, time: Date.now() } }
+const folded = exported.buildTriggerCard({ node: longNode, t: cardZh, getList: () => cardList }, cardList)
+assert.equal(folded.props['data-dsh-mcp-folded'], 'true', 'a long bubble starts folded')
+const foldToggle = finder(folded, 'button').find((button) => String(button.props.className).includes('dsh-mcp-bubble-more'))
+assert.ok(foldToggle, 'the folded bubble offers a control')
+assert.match(collectText(foldToggle).join(''), /展开全部（30 行）/, 'the control says how much is hidden')
+
+let toggled = 0
+const unfolded = exported.buildTriggerCard({ node: longNode, t: cardZh, getList: () => cardList, expanded: true, toggleExpanded: () => (toggled += 1) }, cardList)
+assert.equal(unfolded.props['data-dsh-mcp-folded'], 'false', 'an opened bubble is not folded')
+const foldOpenToggle = finder(unfolded, 'button').find((button) => String(button.props.className).includes('dsh-mcp-bubble-more'))
+assert.match(collectText(foldOpenToggle).join(''), /收起/, 'and the control offers to fold it again')
+foldOpenToggle.props.onClick()
+const foldedClickable = exported.buildTriggerCard({ node: longNode, t: cardZh, getList: () => cardList, toggleExpanded: () => (toggled += 1) }, cardList)
+finder(foldedClickable, 'button').find((button) => String(button.props.className).includes('dsh-mcp-bubble-more')).props.onClick()
+assert.equal(toggled, 2, 'both controls drive the same disclosure')
+checks.push('the fold control opens and closes the long bubble')
+
 
 const generic = exported.buildTriggerCard({ node: { data: { source: { kind: 'schedule' }, content: [{ type: 'text', text: 'nightly' }], time: Date.now() } }, t: cardZh, getList: () => ({ byId: {} }) }, { byId: {} })
 assert.equal(generic.props['data-dsh-mcp-trigger'], 'generic', 'a wake with no sender keeps the shipped generic title')

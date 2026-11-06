@@ -21,6 +21,9 @@ Notable changes to `dsh-mcp-btwy`. Older releases are listed on
   key, lower priority) and renders `dsh-mcp-server` and `dsh-work-sync` deliveries the way the person reads them
   — right-aligned bubble, sending Session above it, one click to open it — while every other wake family keeps
   the shipped card, its clock and its disclosure.
+- A delivered bubble folds itself when it is long. A prompt handed to a session can run to many screens and used to
+  push every following turn out of view: past 12 lines or 700 characters the bubble clamps to a fixed height
+  (fading at the edge) behind "Show all (N lines)", which expands it and folds it back.
 - The chain entry carries a selector that declines every row naming no sender, so an ordinary prompt — and a
   delivery made on behalf of an external MCP client, which has no Session id — renders exactly as before.
 
@@ -28,7 +31,7 @@ Notable changes to `dsh-mcp-btwy`. Older releases are listed on
 
 - `dsh.client.inject` now lists `@deepseek-ai/dsh-client-ui-chat`, the module that declares the slot this entry
   renders into.
-- 274 offline checks (29 in the client half, eleven of them new), 46 live MCP checks, 4 stdio bridge checks.
+- 276 offline checks (31 in the client half, thirteen of them new), 46 live MCP checks, 4 stdio bridge checks.
 
 ## [1.0.3] - 2026-11-05
 
