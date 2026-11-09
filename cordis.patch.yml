@@ -1,10 +1,11 @@
-# dsh-mcp-server bundle: inserts the DSH MCP Server Host plugin, plus the
-# task-start progress-sync row it reports on. They are separate rows so sync can
-# be reloaded, disabled, or replaced without touching the endpoint.
+# dsh-mcp-server bundle: inserts the DSH MCP Server Host plugin.
+#
+# This fork intentionally does NOT insert the `dsh-work-sync` row. The upstream
+# bundle registers task-start progress sync alongside the endpoint, which makes
+# every session that begins a task ask up to three peer sessions "what are you
+# working on". The engine and its service are still shipped (other rows may
+# mount `dsh-mcp-btwy/work-sync` explicitly), they are simply not mounted here.
 - insert:
     - id: dsh-mcp-server
       name: 'dsh-mcp-btwy'
-      config: {}
-    - id: dsh-work-sync
-      name: 'dsh-mcp-btwy/work-sync'
       config: {}
