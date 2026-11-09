@@ -415,6 +415,59 @@ assert.equal(collectText(unknown).join(''), '来自「s3」·智能体消息', '
 assert.equal(exported.buildOriginLine({ source: { kind: 'user' }, t: tZh }, { byId: {} }), null, 'a typed message renders no header')
 checks.push('an unloaded sender still shows the short id, without a dead click')
 
+// --- the settings route's Origin allowlist ------------------------------------
+// A page served from another origin (the usual LAN + reverse-proxy setup) is a
+// different *site* to the browser, so the Origin/Host comparison refuses it. The
+// operator can name that origin; nothing else about the fence changes.
+const LAN = 'http://192.168.50.216:23022'
+// Mirrors index.js configTrust for a browser-shaped request: Origin must match Host.
+const hostFence = (req) => {
+  const origin = req.headers?.origin
+  if (typeof origin !== 'string') return true
+  try {
+    return new URL(origin).host === req.headers.host
+  } catch {
+    return false
+  }
+}
+const makeServer = async (options) => {
+  const srv = createServer((req, res) => {
+    void createConfigHandler({
+      snapshot: async () => ({ package: 'dsh-mcp-btwy', version: '0.9.0', exposeToDsh: true }),
+      write: async () => {},
+      trust: hostFence,
+      ...options,
+    })(req, res)
+  })
+  await new Promise((resolve) => srv.listen(0, '127.0.0.1', resolve))
+  return { srv, base: `http://127.0.0.1:${srv.address().port}` }
+}
+
+const plain = await makeServer({})
+const plainHit = await fetch(plain.base, { headers: { origin: LAN } })
+assert.equal(plainHit.status, 403, 'absent allowedConfigOrigins the fence behaves exactly as before')
+checks.push('absent allowedConfigOrigins the route is unchanged')
+
+const allowed = await makeServer({ allowedOrigins: [LAN] })
+const allowHit = await fetch(allowed.base, { headers: { origin: LAN } })
+assert.equal(allowHit.status, 200, 'the operator-named origin reaches the settings route')
+checks.push('an allowlisted Origin is admitted, loopback still required')
+
+const allowMiss = await fetch(allowed.base, { headers: { origin: 'http://evil.example' } })
+assert.equal(allowMiss.status, 403, 'any other Origin is still refused')
+checks.push('an Origin outside the allowlist is refused')
+
+const allowPost = await fetch(allowed.base, {
+  method: 'POST',
+  headers: { origin: LAN, 'content-type': 'application/json' },
+  body: JSON.stringify({ syncOnStart: false }),
+})
+assert.equal(allowPost.status, 200, 'the allowlisted origin may also write')
+checks.push('an allowlisted Origin may POST a patch too')
+
+await new Promise((resolve) => plain.srv.close(resolve))
+await new Promise((resolve) => allowed.srv.close(resolve))
+
 await new Promise((resolve) => server.close(resolve))
 console.log(`${checks.length} client half checks passed`)
 for (const check of checks) console.log(`ok - ${check}`)

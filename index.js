@@ -554,6 +554,31 @@ export function apply(ctx, config = {}) {
   // itself (1 KB - 1 MB, 4 KB by default), so a malformed value cannot widen it.
   const configMaxBodyBytes = config.configMaxBodyBytes
 
+  /**
+   * Origins allowed to drive the settings page from outside loopback (e.g. behind
+   * a reverse proxy that rewrites Host). Empty by default: absent this key the
+   * route behaves exactly as before — Origin must equal Host.
+   *
+   * Each entry must be an absolute `http(s)://host[:port]` origin; the leftover
+   * values are compared verbatim against `Origin`, so a typo fails closed (the
+   * page stays 403) instead of widening admission.
+   */
+  const allowedConfigOrigins = (() => {
+    const raw = config.allowedConfigOrigins
+    if (raw === undefined || raw === null) return []
+    if (!Array.isArray(raw)) {
+      throw new Error('dsh-mcp-server: "allowedConfigOrigins" must be an array of absolute http(s) origins.')
+    }
+    for (const entry of raw) {
+      if (typeof entry !== 'string' || !/^https?:\/\/[^/]+$/.test(entry)) {
+        throw new Error(
+          `dsh-mcp-server: "allowedConfigOrigins" entries must be absolute origins like "http://host:23022" (got ${JSON.stringify(entry)}).`,
+        )
+      }
+    }
+    return [...new Set(raw)]
+  })()
+
   const disposeRoute = ctx.webServer.register({ kind: 'exact', path, handler })
 
   /**
@@ -753,6 +778,7 @@ export function apply(ctx, config = {}) {
         queueSession: queueOpenSession,
         ackCommand: async () => { guiCommand = undefined },
         trust: configTrust,
+        allowedOrigins: allowedConfigOrigins,
         maxBodyBytes: configMaxBodyBytes,
         logger: log,
       }),

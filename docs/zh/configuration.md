@@ -62,6 +62,7 @@
 | `exposeToDshMode` | `lazy` | `lazy` 注册三工具前门，其 `dsh_mcp_tools` 描述已经携带每个已发布名称及其必需参数（结果行只有 name/purpose/native），并让会话按需打开所需工具；`full` 在加载时注册全部二十六个（常驻 schema 开销）。未知值会在加载时报错。 |
 | `exposeToDshPage` | `true` | 提供 Web 插件页开关读写的回环配置路由。 |
 | `configPath` | `<path>-config` | 该配置端点的路由路径（默认 `/mcp-config`）。 |
+| `allowedConfigOrigins` | `[]` | 允许从**回环之外**驱动该配置页的来源白名单（绝对来源，如 `http://192.168.50.216:23022`）。默认空：`Origin` 必须与 `Host` 一致。非空时，命中名单的 `Origin` 跳过该比较——回环要求仍然生效，因此它能放行的只有本机反向代理转发来的那一页。条目不是合法绝对来源时加载即报错。 |
 | `entryId` | `dsh-mcp-server` | 配置页保存开关时针对的配置档案行。 |
 | `groupSessions` | `true` | 把本端点启动的会话挂到其目录**已有**的项目上，并在后台一次性把早期版本留在“Ungrouped”的会话恢复回去。 |
 | `createGroups` | `false` | 允许本端点为没有项目的目录新建一个侧边栏项目。默认关闭：自动化不会自行扩张侧边栏，目录没有项目的会话仍留在 Ungrouped。 |
