@@ -438,13 +438,61 @@ export function makeServices() {
     return [...(agentScopes.get(agent) ?? [])]
   }
 
-  /** Scheduled-task service: records each request and answers like the Host one. */
+  /**
+   * Scheduled-task service: records each request and answers like the Host one.
+   *
+   * The timing validator mirrors the Host's management boundary — exactly
+   * `kind` plus its snake_case selector, nested for daily/weekly/cron — so a
+   * documented shape that the Host would refuse fails here too.
+   */
   const scheduleTasks = new Map()
   const scheduleCalls = []
   let scheduleSeq = 0
+  const TIMING_SELECTORS = {
+    after: 'after_seconds',
+    at: 'at',
+    every: 'every_seconds',
+    daily: 'daily',
+    weekly: 'weekly',
+    cron: 'cron',
+    rrule: 'rrule',
+  }
+  const timingInvalid = (message) => {
+    const error = new Error(message)
+    error.code = 'invalid_rule'
+    return error
+  }
+  const exactKeys = (value, keys) =>
+    value !== null && typeof value === 'object' && !Array.isArray(value) &&
+    Object.keys(value).sort().join(',') === [...keys].sort().join(',')
+  function validateTiming(timing) {
+    const selector = timing !== null && typeof timing === 'object' ? TIMING_SELECTORS[timing.kind] : undefined
+    if (!selector || !exactKeys(timing, ['kind', selector])) {
+      throw timingInvalid('timing must contain exactly kind and its matching selector.')
+    }
+    if (selector === 'after' || selector === 'every') {
+      if (!Number.isSafeInteger(timing[selector]) || timing[selector] <= 0) {
+        throw timingInvalid(selector + ' must be a positive safe integer.')
+      }
+      return
+    }
+    if (selector === 'at') {
+      if (typeof timing.at !== 'string') throw timingInvalid('at must be an explicit-offset string.')
+      return
+    }
+    if (selector === 'rrule') {
+      if (typeof timing.rrule !== 'string') throw timingInvalid('rrule must be one DTSTART line and one RRULE line.')
+      return
+    }
+    const keys = selector === 'cron' ? ['expression', 'time_zone'] : selector === 'weekly' ? ['time', 'time_zone', 'weekdays'] : ['time', 'time_zone']
+    if (!exactKeys(timing[selector], keys)) {
+      throw timingInvalid(selector + ' must contain exactly ' + keys.join(', ') + '.')
+    }
+  }
   const scheduleService = {
     deliveryLimits: () => ({ newSessionIntervalSeconds: 60 }),
     async create(request, actorSessionId) {
+      validateTiming(request.timing)
       scheduleCalls.push({ op: 'create', request, actorSessionId })
       if (request.timing?.kind === 'bogus') {
         const error = new Error('timing.kind must be one of after, at, every, daily, weekly, cron, rrule')
@@ -464,7 +512,9 @@ export function makeServices() {
         createdAt: '2026-11-09T00:00:00.000Z',
         updatedAt: '2026-11-09T00:00:00.000Z',
         ...(request.timing.kind === 'rrule' ? { rrule: request.timing.rrule } : {}),
-        ...(request.timing.kind === 'daily' ? { time: request.timing.time, timeZone: request.timing.timeZone } : {}),
+        ...(request.timing.kind === 'daily' ? { time: request.timing.daily.time, timeZone: request.timing.daily.time_zone } : {}),
+        ...(request.timing.kind === 'cron' ? { expression: request.timing.cron.expression, timeZone: request.timing.cron.time_zone } : {}),
+        ...(request.timing.kind === 'weekly' ? { time: request.timing.weekly.time, timeZone: request.timing.weekly.time_zone, weekdays: request.timing.weekly.weekdays } : {}),
       }
       scheduleTasks.set(id, task)
       return { ...task }
@@ -505,11 +555,16 @@ export function makeServices() {
         updatedAt: '2026-11-09T01:00:00.000Z',
       }
       if (patch.timing !== undefined) {
+        validateTiming(patch.timing)
         next.kind = patch.timing.kind
         if (patch.timing.kind === 'rrule') next.rrule = patch.timing.rrule
         if (patch.timing.kind === 'daily') {
-          next.time = patch.timing.time
-          next.timeZone = patch.timing.timeZone
+          next.time = patch.timing.daily.time
+          next.timeZone = patch.timing.daily.time_zone
+        }
+        if (patch.timing.kind === 'cron') {
+          next.expression = patch.timing.cron.expression
+          next.timeZone = patch.timing.cron.time_zone
         }
       }
       scheduleTasks.set(next.id, next)

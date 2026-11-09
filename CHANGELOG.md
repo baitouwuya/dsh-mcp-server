@@ -3,6 +3,21 @@
 Notable changes to `dsh-mcp-btwy`. Older releases are listed on
 [GitHub Releases](https://github.com/baitouwuya/dsh-mcp-server/releases).
 
+## [1.0.6] - 2026-11-09
+
+### Fixed
+
+- **The documented `timing` shapes match the Host contract.** The full-selector form takes exactly
+  `kind` plus its snake_case selector, nested for `daily`/`weekly`/`cron`:
+  `{kind:"daily",daily:{time,time_zone}}`, `{kind:"cron",cron:{expression,time_zone}}`,
+  `{kind:"weekly",weekly:{time,time_zone,weekdays}}`, `{kind:"after",after_seconds}`,
+  `{kind:"every",every_seconds}`, `{kind:"at",at}`, `{kind:"rrule",rrule}`. The tool description and the
+  bilingual docs had shown a flat camelCase form that the Host refuses; the plugin never translated it, so
+  only the documentation was wrong. Verified against a live Host: all seven selectors create, and the flat
+  form is refused with `invalid_rule`.
+- The integration harness now applies the same validation, so a documented shape the Host would reject
+  fails the suite instead of passing.
+
 ## [1.0.5] - 2026-11-09
 
 ### Added

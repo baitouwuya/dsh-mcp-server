@@ -42,12 +42,12 @@ try {
   const daily = await call('dsh_schedule_create', {
     title: 'Tokyo standup',
     prompt: 'Send the standup summary.',
-    timing: { kind: 'daily', time: '10:00:00', timeZone: 'Asia/Tokyo' },
+    timing: { kind: 'daily', daily: { time: '10:00:00', time_zone: 'Asia/Tokyo' } },
     sessionId: 'session-current',
   })
   const dailyCall = scheduleCalls().filter((entry) => entry.op === 'create')[1]
-  await check('a full timing selector and an explicit session target pass through unchanged', () => {
-    assert.deepEqual(dailyCall.request.timing, { kind: 'daily', time: '10:00:00', timeZone: 'Asia/Tokyo' })
+  await check('a nested timing selector and an explicit session target pass through unchanged', () => {
+    assert.deepEqual(dailyCall.request.timing, { kind: 'daily', daily: { time: '10:00:00', time_zone: 'Asia/Tokyo' } })
     assert.deepEqual(dailyCall.request.target, { kind: 'session', sessionId: 'session-current' })
     assert.equal(daily.scheduledAtLocal, '2026-11-10T10:00:00+09:00', 'the task zone wins over UTC')
   })
@@ -196,13 +196,17 @@ try {
     method: 'tools/call',
     params: {
       name: 'dsh_schedule_create',
-      arguments: { title: 'Bad rule', prompt: 'Ping.', timing: { kind: 'bogus' } },
+      arguments: {
+        title: 'Flat selector',
+        prompt: 'Ping.',
+        timing: { kind: 'daily', time: '09:00:00', timeZone: 'Asia/Shanghai' },
+      },
     },
   })
-  await check('a Harness input error keeps its code in the model-readable message', () => {
+  await check('the Host timing contract is not translated: a flat camelCase selector keeps its invalid_rule code', () => {
     const text = fail(invalidRule)
     assert.match(text, /invalid_rule/)
-    assert.match(text, /timing\.kind must be one of/)
+    assert.match(text, /must contain exactly kind and its matching selector/)
   })
 
   dropService('schedule')

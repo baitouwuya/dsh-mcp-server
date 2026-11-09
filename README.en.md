@@ -132,7 +132,7 @@ The [docs index](docs/README.md) lists both languages.
 
 ## Status
 
-Version **1.0.5**, checked against **DSH 0.2.2-rc.1** (Cordis 4.1.0): 26 MCP tools, 2 resources, 1 resource
+Version **1.0.6**, checked against **DSH 0.2.2-rc.1** (Cordis 4.1.0): 26 MCP tools, 2 resources, 1 resource
 template, 291 offline checks plus live HTTP and stdio suites. Host-only, zero dependencies, MIT.
 DSH ships its own MCP client (0.2.1+, re-checked on 0.2.2-rc.1), so besides this plugin's built-in front door the Harness can
 connect to this endpoint directly — see
