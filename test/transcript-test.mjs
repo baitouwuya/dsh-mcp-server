@@ -111,5 +111,70 @@ await assert.rejects(() => broken.readTranscript('session-missing'), (error) => 
 })
 checks.push('an unreadable session is invalid params, not an internal error')
 
+// --- events mode -------------------------------------------------------------
+// A log that carries tool traffic: the folded message view drops these rows,
+// which is exactly why a caller may ask for the raw events instead.
+const toolEvents = [
+  { type: 'permission/preset', seq: 1, data: { preset: 'danger-full-access' } },
+  { type: 'user/message', seq: 2, data: { source: { kind: 'user' }, content: [{ type: 'text', text: 'run it' }] } },
+  { type: 'tool/call', seq: 3, time: 1700000003000, data: { name: 'bash', input: { cmd: 'ls' } } },
+  { type: 'tool/result', seq: 4, data: { name: 'bash', output: 'a.txt' } },
+  { type: 'assistant/message', seq: 5, data: { message: { content: [{ type: 'text', text: 'done' }] } } },
+]
+
+function toolReader() {
+  const ctx = {
+    get(name) {
+      if (name !== 'sessionQuery') return undefined
+      return {
+        async readSession() {
+          return { session: { cwd: '/work', agentPreset: 'ptc', createdAt: 1700000000000 }, events: toolEvents }
+        },
+      }
+    },
+  }
+  return createTranscriptReader({ ctx })
+}
+
+const tools = toolReader()
+const rawEvents = await tools.readTranscript('session-tools', { mode: 'events', limit: 10 })
+assert.ok(Array.isArray(rawEvents.events), 'events mode returns an events array')
+assert.deepEqual(rawEvents.events.map((row) => row.type), [
+  'permission/preset', 'user/message', 'tool/call', 'tool/result', 'assistant/message',
+])
+assert.equal(rawEvents.events[2].data.name, 'bash', 'a tool call keeps its payload')
+assert.equal(rawEvents.events[2].time, 1700000003000, 'the event timestamp travels with the row')
+assert.equal(rawEvents.events[1].time, undefined, 'an event without a time carries none')
+assert.equal(rawEvents.totalEvents, 5, 'the response reports the event total')
+assert.equal(rawEvents.matchedEvents, 5)
+assert.equal('messages' in rawEvents, false, 'events mode does not also fold messages')
+checks.push('events mode returns the raw log, tool calls included')
+
+const tailEvents = await tools.readTranscript('session-tools', { mode: 'events', limit: 2 })
+assert.deepEqual(tailEvents.events.map((row) => row.seq), [4, 5], 'events mode windows from the tail')
+assert.equal(tailEvents.returned, 2)
+assert.equal(tailEvents.window.nextAfterSeq, 5)
+checks.push('events mode keeps the tail window and reports how much it left out')
+
+const afterEvents = await tools.readTranscript('session-tools', { mode: 'events', afterSeq: 2 })
+assert.deepEqual(afterEvents.events.map((row) => row.seq), [3, 4, 5], 'afterSeq pages forward over events')
+assert.equal(afterEvents.window.afterSeq, 2)
+checks.push('events mode pages forward with a real cursor')
+
+// --- events mode narrows by type before windowing ----------------------------
+// A caller that only wants the user's own words must still get them from the
+// whole log, not from whatever happened to fall inside the last N rows.
+const userOnly = await tools.readTranscript('session-tools', { mode: 'events', types: ['user/message'], limit: 2 })
+assert.deepEqual(userOnly.events.map((row) => row.seq), [2], 'types narrows the log itself')
+assert.equal(userOnly.matchedEvents, 1, 'matchedEvents counts what the type filter matched')
+assert.equal(userOnly.totalEvents, 5, 'totalEvents still reports the whole log')
+assert.deepEqual(userOnly.types, ['user/message'])
+checks.push('events mode narrows by type before the window is cut')
+
+const toolOnly = await tools.readTranscript('session-tools', { mode: 'events', types: ['tool/call', 'tool/result'] })
+assert.deepEqual(toolOnly.events.map((row) => row.type), ['tool/call', 'tool/result'])
+assert.equal(toolOnly.matchedEvents, 2)
+checks.push('events mode can select the tool traffic alone')
+
 console.log(`${checks.length} transcript checks passed`)
 for (const check of checks) console.log(`ok - ${check}`)
