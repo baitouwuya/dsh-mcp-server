@@ -28,7 +28,7 @@
 | `initialize` | 请求 | `protocolVersion`、`capabilities`、`serverInfo`（`name`、`title`、`version`）以及部署的 `instructions`。 |
 | `notifications/initialized` | 通知 | 接受，无结果。 |
 | `ping` | 请求 | 空对象。 |
-| `tools/list` | 请求 | 全部 21 个工具，每个带 `name`、`description` 和 `inputSchema`（声明了 `title`、`annotations` 或 `outputSchema` 时也一并返回）。 |
+| `tools/list` | 请求 | 全部 26 个工具，每个带 `name`、`description` 和 `inputSchema`（声明了 `title`、`annotations` 或 `outputSchema` 时也一并返回）。 |
 | `tools/call` | 请求 | `content` 块，处理器返回时还有 `structuredContent`。执行失败是带 `isError: true` 的结果；工具名未知是 `-32602` 错误。 |
 | `resources/list` | 请求 | `resources`：`dsh://status` 与 `dsh://sessions`。 |
 | `resources/templates/list` | 请求 | `resourceTemplates`：唯一的 `dsh://session/{sessionId}` 模板。 |

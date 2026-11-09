@@ -47,8 +47,8 @@ other harness ──MCP (Streamable HTTP or stdio)──> DSH MCP Server ──>
 - **Keep same-workspace peers from colliding.** Task-start progress sync asks other top-level agents in the
   same workspace what they are doing and which files they are touching, as its own `dsh-work-sync` row.
 - **Call the same tools from inside DSH.** The default lazy surface is a three-tool front door
-  (`dsh_mcp_tools`, `dsh_mcp_open`, `dsh_mcp_call`) for ~770 tokens at rest instead of ~4.8k; `full`
-  registers all twenty-one. Internal calls stay inside the caller's sandbox and workspace.
+  (`dsh_mcp_tools`, `dsh_mcp_open`, `dsh_mcp_call`) for ~820 tokens at rest instead of ~6.3k; `full`
+  registers all twenty-six. Internal calls stay inside the caller's sandbox and workspace.
 - **Point the person at the work.** Sessions this endpoint starts join the sidebar project their directory
   already has, and `dsh_open_session` asks the open Web GUI to select one.
 - **Configure it from the Plugins page, or by preset.** On/off, lazy vs. full surface, sidebar grouping,
@@ -119,7 +119,7 @@ Confirm you trust the harness that will call this endpoint before installing: it
 | Document | What is inside |
 |---|---|
 | [Getting started](docs/en/getting-started.md) | Install, endpoint file and token, HTTP/stdio/DSH-as-client configs, the self-check bundle. |
-| [Tools and resources](docs/en/tools.md) | All 21 tools, the three resources, progressive reads, pending decisions. |
+| [Tools and resources](docs/en/tools.md) | All 26 tools, the three resources, progressive reads, pending decisions. |
 | [Protocol support](docs/en/protocol.md) | Supported MCP revisions, methods, capabilities, notifications, error codes, authentication, session headers, and unsupported features. |
 | [Sessions and delivery](docs/en/sessions.md) | Caller identity and ownership, waiting, sidebar grouping, queue/steer, GUI open. |
 | [DSH-local tools](docs/en/dsh-local.md) | The in-Harness surface, the lazy front door, and the authority ceiling. |
@@ -132,8 +132,8 @@ The [docs index](docs/README.md) lists both languages.
 
 ## Status
 
-Version **1.0.4**, checked against **DSH 0.2.2-rc.1** (Cordis 4.1.0): 21 MCP tools, 2 resources, 1 resource
-template, 277 offline checks plus live HTTP and stdio suites. Host-only, zero dependencies, MIT.
+Version **1.0.5**, checked against **DSH 0.2.2-rc.1** (Cordis 4.1.0): 26 MCP tools, 2 resources, 1 resource
+template, 291 offline checks plus live HTTP and stdio suites. Host-only, zero dependencies, MIT.
 DSH ships its own MCP client (0.2.1+, re-checked on 0.2.2-rc.1), so besides this plugin's built-in front door the Harness can
 connect to this endpoint directly — see
 [Connecting DSH's own MCP client](docs/en/dsh-local.md#connecting-dshs-own-mcp-client).

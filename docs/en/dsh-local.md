@@ -10,16 +10,16 @@ client config. On by default; set `exposeToDsh: false` to keep the plugin MCP-on
 
 ## On demand, not all at once
 
-Twenty-one tool schemas are ~19.2 KB (~4.8k tokens) of permanent prompt cost in **every** session, whether
+Twenty-six tool schemas are ~25 KB (~6.3k tokens) of permanent prompt cost in **every** session, whether
 that session ever delegates anything or not. So the default surface is a three-tool front door:
 
 | Front-door tool | Purpose |
 |---|---|
 | `dsh_mcp_tools` | The catalogue — every published name **with its call signature** — plus one line per tool and `native` when it is already callable. `name` returns that tool's parameter schema, projected for the DSH registry. |
-| `dsh_mcp_open` | Register the named tools (**or `all: true`) into *this* session**, so they are callable natively from the next step on. The target is always explicit: an empty or missing list is refused rather than quietly opening all twenty-one. |
+| `dsh_mcp_open` | Register the named tools (**or `all: true`) into *this* session**, so they are callable natively from the next step on. The target is always explicit: an empty or missing list is refused rather than quietly opening all twenty-six. |
 | `dsh_mcp_call` | Call one published tool directly, without opening it — for a single call that does not deserve a permanent schema. |
 
-That is ~3.1 KB (~770 tokens) at rest instead of ~19.2 KB, and the rest of the table is paid for only by
+That is ~3.2 KB (~820 tokens) at rest instead of ~25 KB, and the rest of the table is paid for only by
 sessions that actually use it. `dsh_status` reports the whole shape:
 `dshTools: { enabled, mode, registered, published, via }`.
 
@@ -30,7 +30,7 @@ before it can call anything, and pays that step again in every new session. So t
 catalogue itself — every published name with its required arguments, inside `dsh_mcp_tools`'s own
 description:
 
-> Publishes 21: dsh_run_prompt(prompt), dsh_continue_session(sessionId, prompt), dsh_ask_session(sessionId, question), …
+> Publishes 26: dsh_run_prompt(prompt), dsh_continue_session(sessionId, prompt), dsh_ask_session(sessionId, question), …
 
 That index is ~1.0 KB (~250 tokens) and turns "send this to session X" into a single call:
 `dsh_mcp_call({ tool: "dsh_continue_session", arguments: { sessionId, prompt } })`. Names are forgiving:

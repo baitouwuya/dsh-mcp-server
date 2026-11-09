@@ -2,7 +2,7 @@
 
 > 属于 [DSH MCP Server](../../README.md) · [文档索引](../README.md)
 
-21 个 MCP 工具、2 个资源和 1 个资源模板——每一项的设计都保证：任何一次调用都不会把整个会话一次性倾倒出来。
+26 个 MCP 工具、2 个资源和 1 个资源模板——每一项的设计都保证：任何一次调用都不会把整个会话一次性倾倒出来。
 
 ## 暴露的内容
 
@@ -15,6 +15,11 @@
 | `dsh_get_question` | 按 id 读取一个必须回复的问题：问题文本、提问者、提问时间、已发送多少条提醒，以及答案（如果已存在）。提醒只携带 id；目标会话正是通过这里重新读到问题的。 |
 | `dsh_list_commands` | 某个会话的智能体当前可以运行的斜杠命令：全局命令层加上该智能体预设所组合的内容，因此可用性随智能体预设而不同。 |
 | `dsh_run_command` | 在某个会话中运行一条斜杠命令，并返回其落定后的 `{ kind, text, commandId }`。`line` 接收完整的命令行（`"/compact"`、`"/permission danger-full-access"`）；`command`（加上可选的 `args`）接收裸名称。命令立即执行，不经过模型回合。 |
+| `dsh_schedule_create` | 创建一个宿主的定时任务：每次触发时把 `prompt` 作为用户消息投递给目标。时间用 `rrule`（一行 `DTSTART` + 一行 `RRULE`，与 Harness 智能体工具同一 RFC 5545 子集）或 `timing`（完整选择器：`after`/`at`/`every`/`daily`/`weekly`/`cron`/`rrule`）。目标是 `this_session`（调用方自己的 DSH 会话，外部 MCP 调用方拿不到）、`new_once`（首次投递时创建一个会话并复用）或 `new`（每次新建会话），也可用 `sessionId` 直接指定已存在的会话。返回任务 id 与下一次触发（`scheduledAt` 为 UTC，`scheduledAtLocal` 带本地偏移）。 |
+| `dsh_schedule_list` | 宿主全部定时任务的一页——包括其他会话和 Web「自动化」页面创建的任务：活跃任务按下次触发排序在前，暂停和已结束的随后；`active` 过滤，`limit`（1–500，默认 100）与 `offset` 分页。 |
+| `dsh_schedule_view` | 按 id 读取一个任务：标题、指令、循环字段、投递目标、状态、修订号 `updatedAt` 和最近一次投递；未知 id 返回 `{ id, code: "schedule_not_found" }`。 |
+| `dsh_schedule_edit` | 修改一个任务：`action: "update"` 至少应用一项 `title`/`prompt`/`rrule`/`timing`/`target`/`sessionId`/`active`（`false` 暂停，`true` 恢复且需要仍有未来触发），`action: "delete"` 删除任务及其投递记录（不会撤回已入队的消息）。带 `expectedUpdatedAt` 时，任务若已变化则返回 `{ id, code: "schedule_conflict" }` 且不写入。 |
+| `dsh_schedule_run` | 立即投递某个任务一次，既不消耗也不移动它的既定触发时间。目标会话已归档会被拒绝；任务正在执行时返回 `{ id, code: "schedule_execution_pending" }`。 |
 | `dsh_list_sessions` | 会话索引的一页：`sessionId`、标题、运行状态、归档状态、活动时间，以及记录在案的所有者智能体（`view: "full"` 会加上 cwd 和存活状态）。在服务端用 `query`（标题/cwd/所有者/id）、`mine: true`（或 `restrictToOwner` 设置）、`owner: "<id>"`（仅用于收窄：在受限端点上指定其他所有者会被拒绝）和 `running` 收窄结果；用 `cursor`/`nextCursor` 翻页。除非 `includeArchived: true`，归档会话会被隐藏，与 Web UI 保持一致。 |
 | `dsh_read_session` | 某个会话对话记录的一个窗口（仅包含用户撰写和助手消息），外加最后一次持久化的 `permissionPreset`。`mode: "tail"`（默认，最后 10 条）/ `"head"` / `"outline"`（每条消息一行紧凑记录，含预览和长度，不含全文）；用 `roles`、`afterSeq` + `window.nextAfterSeq` 翻页，用 `maxChars`（默认 2000）限制单次回答的长度。会报告 `totalMessages`、`matchedMessages` 和 `returned`，因此调用方始终知道自己还有哪些没读到。`limit: 0` 请求最大的窗口（上限 1000 条消息），单次响应上限约 512K 字符（`truncatedByBudget`），所以一次读取永远不会倾倒整个长会话。会话处于归档状态时仍然可用。 |
 | `dsh_answer_request` | 回答一个被挂起的决策，仅在部署启用了 `answerApprovals`/`answerQuestions`（或旧的 `answerUserRequests`）时可用：审批用 `decision: "allow"|"deny"`（一次性授权，或拒绝），问题用 `answers: [{ id, selected }]`。id 来自 `dsh_list_requests`，该工具会把本端点挂起的请求标记为 `answerable: true`。GUI 仍在竞争中——谁先决定谁生效——未回答的请求仍会在 `requestAnswerTimeoutMs` 处按失败关闭（fail closed）。DSH 内部调用方只有在已持有 `danger-full-access` 时才能处理**审批**；问题则始终可以回答（见 [DSH 本地工具](dsh-local.md)）。 |
@@ -35,6 +40,8 @@
 权限预设需要 宿主的 `permissionPresets` 服务（`@deepseek-ai/dsh-permission-presets`）。`permissionPreset` 通过该服务自己的 `set()` 应用——与 GUI `/permission` 命令是同一条写入路径——时机是会话已就绪、且其提示词被接纳之前，因此该回合自身的工具调用就能看到选定的沙箱模式和审批策略。结果会回显实际应用的预设；`dsh_read_session` 会把会话最后一次持久化的 `permission/preset` 事件重新并入其返回负载，`dsh_status` 则携带 `defaultPermissionPreset` 和目录。缺少该服务时，权限相关字段会被省略，`dsh_list_permission_presets` 会报告服务不可用。未指定 `permissionPreset` 创建的会话保持部署默认值，与 GUI 创建的会话完全一致。
 
 命令需要 宿主的 `commands` 服务，并且按**智能体**而非按会话定位：注册表会把全局层与该智能体所挂载预设的各层合并，因此 `dsh_list_commands` 必须按会话询问，像 `/compact` 这样的命令只有在该会话的预设组合了它时才存在（`standard`/`ptc`/`cordis` 有；`minimal` 没有）。执行走的是 Web 输入框所用的同一个 `commands.execute()`：处理器立即运行，生命周期记录为 `command/run` + `command/done`，并且**不会启动模型回合**。`kind` 为 `success` 或 `error`；宿主无法解析为命令的行，或它不认识的名称，会被拒绝并列出可用命令。
+
+定时任务需要 宿主的 `schedule` 服务（`@deepseek-ai/dsh-schedule`）；缺少该服务时五个 `dsh_schedule_*` 工具都会报告服务不可用，而不是悄悄失败。任务属于宿主而不是某个会话，因此 `dsh_schedule_list` 返回所有任务、`dsh_schedule_edit` 可以按 id 改动任何任务，只有投递目标指向某个会话。`this_session` 要求调用方本身就是一个 DSH 会话——外部 MCP 客户端请改用 `sessionId`，或者 `new_once`/`new`。宿主必须保持运行才能投递；重启之后循环任务只补发最近错过的一次，而删除任务不会撤回已经进入目标会话收件箱的消息。
 
 ## 渐进式披露
 

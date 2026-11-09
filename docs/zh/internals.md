@@ -42,7 +42,7 @@
 - **`initialize` 指令是地图，而不是工具清单的倾倒。** 它说明哪个工具用于启动会话、哪个用于继续会话，何时使用 `wait: false` + `dsh_wait_session`（等待从不取消），读取是窗口式（`mode`/`maxChars`/`afterSeq`）而非全量倾倒，以及审批和问题是按会话报告的，并且只有当部署启用了 `answerApprovals`/`answerQuestions`（或旧的 `answerUserRequests`）时才可回答。
 - **描述承载了 schema 无法承载的内容。** `dsh_run_command(sessionId, line|command)` 在签名中写明了它的两种形态，因为模型如果照着错误的形态调用，结果比没有描述更糟。
 - **失败是分类型的。** 未知工具或格式错误的资源 id 会返回 `-32602 invalidParams`；普通的工具失败是 `isError` 结果，不会结束回合。消息会说明下一步该做什么（“用 `stopActivity: true` 重试”、“在 Harness GUI 中提高此会话的预设”），而不是泄露堆栈。
-- **工具面感知提示词开销。** `exposeToDshMode: lazy` 给 DSH 会话三个工具，而 `dsh_mcp_tools` 的描述已经携带所有已发布的名称及其必需参数（结果行是名称、用途和 `native`）；`full` 则把全部 21 个放入提示词。
+- **工具面感知提示词开销。** `exposeToDshMode: lazy` 给 DSH 会话三个工具，而 `dsh_mcp_tools` 的描述已经携带所有已发布的名称及其必需参数（结果行是名称、用途和 `native`）；`full` 则把全部 26 个放入提示词。
 - **状态只需一次调用。** `dsh_status` 回答“我在跟什么通信”——端点、插件版本、当前模型选择、投递策略、同步状态、工具表形态——无需探测。
 
 ## 验证
@@ -69,7 +69,7 @@ node test/client-half-test.mjs         # 18 checks: the browser half's bundle pa
 node test/streaming-transport-test.mjs  # 5 checks: the JSON reply, the SSE reply with keep-alives, a JSON-only client, a streamed error
 node test/stdio-stream-test.mjs         # 3 checks: the bridge parses an event stream and re-reads the endpoint file
 node test/stdio-bridge-test.mjs        # 4 checks, needs a RUNNING Harness (one real delegated turn)
-node test/live-e2e-test.mjs            # 46 checks over HTTP: protocol, resources, all twenty-one tools,
+node test/live-e2e-test.mjs            # 46 checks over HTTP: protocol, resources, all twenty-six tools,
                                        # archive/unarchive, permission presets, commands, error paths,
                                        # 4 real turns (needs a Harness)
 ```
@@ -78,7 +78,7 @@ node test/live-e2e-test.mjs            # 46 checks over HTTP: protocol, resource
 
 针对 0.2.2-rc.1（Cordis 4.1.0）的复验也覆盖了客户端那一侧：组合器仍接受本文的 `dsh.client` 声明与 `plugins.row.config` / `plugins.bundle.config` 槽位，`dsh_status.clientPage.inGraph` 为 `true`；官方 MCP 客户端（`@modelcontextprotocol/client` 2.2.0 与 2.4.0）各握手一次，21 个工具、3 个资源、1 个模板与 `dsh_status` 都正常，协商落在 `2025-11-25`，六个受支持版本请求时都原样回显。本文依赖的组合原语（`ctx.effect`、`ctx.inject`、`ctx.on`、`ctx.webServer.register`）与 `agents` / `sessionController` / `sessionQuery` / `permissionPresets` / `commands` / `workspaceRegistry` 服务均原样沿用，所以这次升级没有改动任何代码。0.2.2 新增的保留预设 `auto` 单独覆盖：上限按它授予的 `danger-full-access` 沙箱衡量，处在该级的调用方可以授予，内部调用方新建的会话只有在其自身就跑在该模式下时才继承，而它的审查集成未组合时会以可用预设列表拒绝。`custom`——会话旋钮不匹配任何预设时的派生读数——从不作为名字授予。
 
-桥接器的 schema 投影已针对 Harness **自身**的 JSON-Schema 校验器（从应用包中提取）验证：21 个原始 MCP schema 中有 15 个使用了 `minLength`，而该校验器会直接拒绝这个关键字；全部 21 个投影后的 schema——以及各种形态的规范值——都能被接受。
+桥接器的 schema 投影已针对 Harness **自身**的 JSON-Schema 校验器（从应用包中提取）验证：26 个原始 MCP schema 中有 19 个使用了 `minLength`，而该校验器会直接拒绝这个关键字；全部 26 个投影后的 schema——以及各种形态的规范值——都能被接受。
 
 开发过程中使用的实机检查还覆盖了：针对运行中 Harness 的真实 MCP 客户端交互，端到端的 `dsh_run_prompt` → `dsh_continue_session` → `dsh_read_session` 流程，通过 MCP 应用并重新固定权限预设、再将其从对话记录中折回，在不新增模型消息的情况下执行命令，等待一个已分离的回合而不取消它，通过请求头与 User-Agent 两级识别调用方，窗口化/大纲式对话记录读取，分离启动 + 取消，以及 stdio 桥接器。
 

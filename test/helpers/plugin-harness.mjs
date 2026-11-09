@@ -438,6 +438,90 @@ export function makeServices() {
     return [...(agentScopes.get(agent) ?? [])]
   }
 
+  /** Scheduled-task service: records each request and answers like the Host one. */
+  const scheduleTasks = new Map()
+  const scheduleCalls = []
+  let scheduleSeq = 0
+  const scheduleService = {
+    deliveryLimits: () => ({ newSessionIntervalSeconds: 60 }),
+    async create(request, actorSessionId) {
+      scheduleCalls.push({ op: 'create', request, actorSessionId })
+      if (request.timing?.kind === 'bogus') {
+        const error = new Error('timing.kind must be one of after, at, every, daily, weekly, cron, rrule')
+        error.code = 'invalid_rule'
+        throw error
+      }
+      const id = 'schedule-' + ++scheduleSeq
+      const target = request.target ?? { kind: 'new_once', sessionId: 'session-reserved-' + scheduleSeq }
+      const task = {
+        id,
+        kind: request.timing.kind,
+        title: request.title,
+        prompt: request.prompt,
+        scheduledAt: '2026-11-10T01:00:00.000Z',
+        target,
+        status: 'active',
+        createdAt: '2026-11-09T00:00:00.000Z',
+        updatedAt: '2026-11-09T00:00:00.000Z',
+        ...(request.timing.kind === 'rrule' ? { rrule: request.timing.rrule } : {}),
+        ...(request.timing.kind === 'daily' ? { time: request.timing.time, timeZone: request.timing.timeZone } : {}),
+      }
+      scheduleTasks.set(id, task)
+      return { ...task }
+    },
+    async list(request = {}) {
+      scheduleCalls.push({ op: 'list', request })
+      const all = [...scheduleTasks.values()].filter(
+        (task) => request.active === undefined || (task.status === 'active') === request.active,
+      )
+      const limit = Number.isInteger(request.limit) ? request.limit : 100
+      const offset = Number.isInteger(request.offset) ? request.offset : 0
+      const page = all.slice(offset, offset + limit)
+      return { items: page, shown: page.length, total: all.length, limit, offset }
+    },
+    async view(request) {
+      scheduleCalls.push({ op: 'view', request })
+      const task = scheduleTasks.get(request.id)
+      return task ? { ...task } : { id: request.id, code: 'schedule_not_found' }
+    },
+    async edit(request, actorSessionId) {
+      scheduleCalls.push({ op: 'edit', request, actorSessionId })
+      const current = scheduleTasks.get(request.id)
+      if (current === undefined) return { id: request.id, code: 'schedule_not_found' }
+      if (request.expectedUpdatedAt !== undefined && request.expectedUpdatedAt !== (current.updatedAt ?? null)) {
+        return { id: request.id, code: 'schedule_conflict' }
+      }
+      if (request.action === 'delete') {
+        scheduleTasks.delete(request.id)
+        return { id: request.id, deleted: true }
+      }
+      const patch = request.patch ?? {}
+      const next = {
+        ...current,
+        ...(patch.title === undefined ? {} : { title: patch.title }),
+        ...(patch.prompt === undefined ? {} : { prompt: patch.prompt }),
+        ...(patch.target === undefined ? {} : { target: patch.target }),
+        ...(patch.active === undefined ? {} : { status: patch.active ? 'active' : 'paused' }),
+        updatedAt: '2026-11-09T01:00:00.000Z',
+      }
+      if (patch.timing !== undefined) {
+        next.kind = patch.timing.kind
+        if (patch.timing.kind === 'rrule') next.rrule = patch.timing.rrule
+        if (patch.timing.kind === 'daily') {
+          next.time = patch.timing.time
+          next.timeZone = patch.timing.timeZone
+        }
+      }
+      scheduleTasks.set(next.id, next)
+      return { ...next }
+    },
+    async run(request) {
+      scheduleCalls.push({ op: 'run', request })
+      const task = scheduleTasks.get(request.id)
+      return task ? { ...task } : { id: request.id, code: 'schedule_not_found' }
+    },
+  }
+
   /** The Harness tool registry: what the bridge registers into. */
   const tools = {
     schemas: () => [{ name: 'read_file', description: 'Read a file' }],
@@ -456,8 +540,7 @@ export function makeServices() {
     },
   }
 
-  return {
-    services: {
+  const services = {
       sessionController,
       sessionQuery,
       sessions,
@@ -475,7 +558,11 @@ export function makeServices() {
       agentDefaultModel: { currentSelection: () => ({ ...defaultSelection }) },
       setDefaultSelection: (selection) => { defaultSelection = selection },
       setSelectModelFailure: (value) => { selectModelFailure = value === true },
-    },
+      schedule: scheduleService,
+  }
+
+  return {
+    services,
     webServer,
     getPrompt: () => pendingPrompt,
     setBusy: (value) => { busy = value },
@@ -506,6 +593,9 @@ export function makeServices() {
     setCallerMode: (mode) => { callerMode = mode },
     setCallerPreset: (preset) => { callerPreset = preset },
     setLiveAuto: (value) => { liveAuto = value === true },
+    scheduleCalls: () => [...scheduleCalls],
+    scheduleTasks: () => [...scheduleTasks.values()].map((task) => ({ ...task })),
+    dropService: (name) => { delete services[name] },
   }
 }
 /** Listen on a throwaway port and route through whatever the plugin registered at call time. */

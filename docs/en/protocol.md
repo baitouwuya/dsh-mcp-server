@@ -30,7 +30,7 @@ supports.
 | `initialize` | request | `protocolVersion`, `capabilities`, `serverInfo` (`name`, `title`, `version`) and the deployment's `instructions`. |
 | `notifications/initialized` | notification | Accepted with no result. |
 | `ping` | request | An empty object. |
-| `tools/list` | request | All 21 tools, each with `name`, `description` and `inputSchema` (plus `title`, `annotations` or `outputSchema` when declared). |
+| `tools/list` | request | All 26 tools, each with `name`, `description` and `inputSchema` (plus `title`, `annotations` or `outputSchema` when declared). |
 | `tools/call` | request | `content` blocks and, when the handler returns one, `structuredContent`. An execution failure is a result with `isError: true`; an unknown tool name is a `-32602` error. |
 | `resources/list` | request | `resources`: `dsh://status` and `dsh://sessions`. |
 | `resources/templates/list` | request | `resourceTemplates`: the single `dsh://session/{sessionId}` template. |

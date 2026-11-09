@@ -3,6 +3,37 @@
 Notable changes to `dsh-mcp-btwy`. Older releases are listed on
 [GitHub Releases](https://github.com/baitouwuya/dsh-mcp-server/releases).
 
+## [1.0.5] - 2026-11-09
+
+### Added
+
+- **Scheduled tasks over MCP.** Five tools manage the same Host tasks the Web Automation page and the
+  `schedule_*` agent tools use: `dsh_schedule_create` (an RRULE — one `DTSTART` line plus one `RRULE` line
+  — or the full `timing` selector: `after`, `at`, `every`, `daily`, `weekly`, `cron`, `rrule`),
+  `dsh_schedule_list`, `dsh_schedule_view`, `dsh_schedule_edit` (update, pause, resume, delete, with
+  `expectedUpdatedAt` for a conditional write) and `dsh_schedule_run` (deliver once now without moving the
+  occurrence). The destination is an existing session (`sessionId`), the calling session (`this_session`),
+  one reused session (`new_once`), or a new session per delivery (`new`).
+- Every task is returned with `scheduledAtLocal` in its own zone — the explicit `timeZone` of a
+  cron/daily/weekly rule, or the `TZID` of an RRULE — because the stored instant is UTC and the display zone
+  is what a person checks.
+- The task catalogue is Host-wide: `dsh_schedule_list` returns tasks other sessions created, and
+  `dsh_schedule_edit` changes any of them by id; only the destination names a session. `this_session` needs
+  a calling DSH session, so an external MCP client is refused with a pointer to `sessionId`/`new_once`/`new`.
+- Harness input failures keep their code (`invalid_rule`, `invalid_time_zone`, `not_future`,
+  `frequency_too_high`, `subagent_session`, …) in the model-readable message, and a deployment without the
+  `schedule` service says so instead of failing silently.
+- The published table grows to 26 tools, so `dsh_status.toolNames` and the DSH-facing catalogue follow;
+  the three-tool front door's index stays under its 3.5 KB ceiling.
+
+### Changed
+
+- The Client half's panel copy advertises the current published count.
+
+### Checks
+
+- 291 offline checks (14 new in `test/integration/schedule-tools.mjs`), plus the live HTTP and stdio suites.
+
 ## [1.0.4] - 2026-11-06
 
 ### Added

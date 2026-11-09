@@ -10,16 +10,16 @@
 
 ## 按需加载，而不是一次全给
 
-二十一个工具的 schema 合计约 19.2 KB（约 4.8k tokens），在**每个**会话里都是常驻的提示词开销，
+二十六个工具的 schema 合计约 25 KB（约 6.3k tokens），在**每个**会话里都是常驻的提示词开销，
 无论该会话是否真的委派过任何事。所以默认的暴露面是一扇三工具的“前门”：
 
 | 前门工具 | 用途 |
 |---|---|
 | `dsh_mcp_tools` | 目录——每个已发布的名称**连同其调用签名**——外加每个工具一行说明，已可直接调用时标 `native`。`name` 返回该工具的参数 schema，并按 DSH 注册表投影。 |
-| `dsh_mcp_open` | 把指定的工具（**或 `all: true`）注册进*当前*会话**，使其从下一步起可原生调用。目标始终显式：列表为空或缺失时会被拒绝，而不是悄悄打开全部二十一个。 |
+| `dsh_mcp_open` | 把指定的工具（**或 `all: true`）注册进*当前*会话**，使其从下一步起可原生调用。目标始终显式：列表为空或缺失时会被拒绝，而不是悄悄打开全部二十六个。 |
 | `dsh_mcp_call` | 直接调用一个已发布的工具而不打开它——适用于不值得占用常驻 schema 的一次性调用。 |
 
-这样静态开销约为 3.1 KB（约 770 tokens）而不是约 19.2 KB，工具表剩下的部分只由真正用到它的
+这样静态开销约为 3.2 KB（约 820 tokens）而不是约 25 KB，工具表剩下的部分只由真正用到它的
 会话来付费。`dsh_status` 会报告整体形态：
 `dshTools: { enabled, mode, registered, published, via }`。
 
@@ -29,9 +29,9 @@
 工具，而且每个新会话都要再付一次这一步。所以前门直接给出目录本身——每个已发布名称及其必需
 参数，就写在 `dsh_mcp_tools` 自己的描述里：
 
-> 发布 21 个：dsh_run_prompt(prompt)、dsh_continue_session(sessionId, prompt)、dsh_ask_session(sessionId, question)、…
+> 发布 26 个：dsh_run_prompt(prompt)、dsh_continue_session(sessionId, prompt)、dsh_ask_session(sessionId, question)、…
 
-这个索引约 1.0 KB（约 250 tokens），把“把这段发给会话 X”变成一次调用：
+这个索引约 1.5 KB（约 375 tokens），把“把这段发给会话 X”变成一次调用：
 `dsh_mcp_call({ tool: "dsh_continue_session", arguments: { sessionId, prompt } })`。名称匹配很宽容：
 只写 `continue_session` 也能解析；写得接近但不完全对时会被拒绝，并列出相近的匹配；
 `arguments` 接受 JSON 对象字符串；被拒绝的调用最后会指出用 `dsh_mcp_tools({ name })` 查询即可

@@ -66,7 +66,7 @@ What a calling model sees, and why it was shaped that way:
   `stopActivity: true`", "raise this session's preset in the Harness GUI") instead of leaking a stack.
 - **The surface is load-aware.** `exposeToDshMode: lazy` gives a DSH session three tools, and the `dsh_mcp_tools`
   description already carries every published name and its required arguments (the result rows are name, purpose
-  and `native`); `full` puts all twenty-one in the prompt.
+  and `native`); `full` puts all twenty-six in the prompt.
 - **Status is one call.** `dsh_status` answers "what am I talking to" — endpoint, plugin version, live model
   selection, delivery policy, sync state, tool-table shape — without probing.
 
@@ -94,7 +94,7 @@ node test/client-half-test.mjs         # 18 checks: the browser half's bundle pa
 node test/streaming-transport-test.mjs  # 5 checks: the JSON reply, the SSE reply with keep-alives, a JSON-only client, a streamed error
 node test/stdio-stream-test.mjs         # 3 checks: the bridge parses an event stream and re-reads the endpoint file
 node test/stdio-bridge-test.mjs        # 4 checks, needs a RUNNING Harness (one real delegated turn)
-node test/live-e2e-test.mjs            # 46 checks over HTTP: protocol, resources, all twenty-one tools,
+node test/live-e2e-test.mjs            # 46 checks over HTTP: protocol, resources, all twenty-six tools,
                                        # archive/unarchive, permission presets, commands, error paths,
                                        # 4 real turns (needs a Harness)
 ```
@@ -104,8 +104,8 @@ node test/live-e2e-test.mjs            # 46 checks over HTTP: protocol, resource
 Re-validating on 0.2.2-rc.1 (Cordis 4.1.0) covered the client side too: the composer still accepts this package's `dsh.client` declaration and both the `plugins.row.config` / `plugins.bundle.config` slots, `dsh_status.clientPage.inGraph` is `true`, and the official MCP client (`@modelcontextprotocol/client` 2.2.0 and 2.4.0) handshakes once each — 21 tools, 3 resources, 1 template and `dsh_status` all behave, negotiating `2025-11-25` and echoing all six supported revisions when asked. The composition primitives this plugin builds on (`ctx.effect`, `ctx.inject`, `ctx.on`, `ctx.webServer.register`) and the `agents` / `sessionController` / `sessionQuery` / `permissionPresets` / `commands` / `workspaceRegistry` services carried over unchanged, so the whole suite needed no code change for the upgrade. 0.2.2's new reserved `auto` preset is covered explicitly: the ceiling judges it by the `danger-full-access` sandbox it grants, a caller at that rung may hand it on, a session an internal caller starts never inherits it unless the caller runs under it, and it is refused with the available list when its review integration is not composed. `custom` — the derived reading when a session's knobs match no preset — is never granted as a name.
 
 The bridge's schema projection was verified against the Harness's **own** JSON-Schema validator
-(extracted from the app bundle): 15 of the 21 raw MCP schemas use `minLength`, a keyword that validator
-rejects outright, and all 21 projected schemas — plus canonical values of every shape — are accepted.
+(extracted from the app bundle): 19 of the 26 raw MCP schemas use `minLength`, a keyword that validator
+rejects outright, and all 26 projected schemas — plus canonical values of every shape — are accepted.
 
 Live checks used during development also covered: a real MCP client exchange against the running
 Harness, an end-to-end `dsh_run_prompt` → `dsh_continue_session` → `dsh_read_session` flow, permission

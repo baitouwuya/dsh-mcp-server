@@ -59,7 +59,7 @@
 | `clientsFile` | `$DSH_HOME/mcp/dsh-mcp-clients.json` | 调用方注册表（见过的智能体 + 会话所有者）的保存位置，权限 0600。 |
 | `clientsFlushMs` | `5000` | 注册表写入落盘前合并多长时间。 |
 | `exposeToDsh` | `true` | 把 MCP 工具暴露给 DSH 本身。`false` 让端点只提供 MCP。 |
-| `exposeToDshMode` | `lazy` | `lazy` 注册三工具前门，其 `dsh_mcp_tools` 描述已经携带每个已发布名称及其必需参数（结果行只有 name/purpose/native），并让会话按需打开所需工具；`full` 在加载时注册全部二十一个（常驻 schema 开销）。未知值会在加载时报错。 |
+| `exposeToDshMode` | `lazy` | `lazy` 注册三工具前门，其 `dsh_mcp_tools` 描述已经携带每个已发布名称及其必需参数（结果行只有 name/purpose/native），并让会话按需打开所需工具；`full` 在加载时注册全部二十六个（常驻 schema 开销）。未知值会在加载时报错。 |
 | `exposeToDshPage` | `true` | 提供 Web 插件页开关读写的回环配置路由。 |
 | `configPath` | `<path>-config` | 该配置端点的路由路径（默认 `/mcp-config`）。 |
 | `entryId` | `dsh-mcp-server` | 配置页保存开关时针对的配置档案行。 |
