@@ -3,6 +3,51 @@
 Notable changes to `dsh-mcp-btwy`. Older releases are listed on
 [GitHub Releases](https://github.com/baitouwuya/dsh-mcp-server/releases).
 
+## [1.1.0] - 2026-11-09
+
+### Added
+
+- **Scheduled tasks over MCP — the headline of this minor release.** Five tools over the Host `schedule`
+  service, the same tasks the Web Automation page and the `schedule_*` agent tools manage:
+  `dsh_schedule_create` (an RRULE — one `DTSTART` line plus one `RRULE` line — or the full `timing`
+  selector), `dsh_schedule_list`, `dsh_schedule_view`, `dsh_schedule_edit` (update, pause, resume, delete,
+  with `expectedUpdatedAt` for a conditional write) and `dsh_schedule_run` (deliver once now without moving
+  the occurrence). The destination is an existing session (`sessionId`), the calling session
+  (`this_session`), one reused session (`new_once`), or a new session per delivery (`new`).
+- The full `timing` selector takes exactly `kind` plus its snake_case selector, nested for
+  `daily`/`weekly`/`cron`: `{kind:"daily",daily:{time,time_zone}}`,
+  `{kind:"cron",cron:{expression,time_zone}}`, `{kind:"weekly",weekly:{time,time_zone,weekdays}}`,
+  `{kind:"after",after_seconds}`, `{kind:"every",every_seconds}`, `{kind:"at",at}`,
+  `{kind:"rrule",rrule}`.
+- Every task is returned with `scheduledAtLocal` in its own zone — the explicit `time_zone` of a
+  cron/daily/weekly rule, or the `TZID` of an RRULE; elapsed and absolute rules display in UTC, as the
+  Harness agent tools do — because the stored instant is UTC and the display zone is what a person checks.
+- The task catalogue is Host-wide: `dsh_schedule_list` returns tasks other sessions created, and
+  `dsh_schedule_edit` changes any of them by id; only the destination names a session. `this_session` needs
+  a calling DSH session, so an external MCP client is refused with a pointer to `sessionId`/`new_once`/`new`.
+- Harness input failures keep their code (`invalid_rule`, `invalid_time_zone`, `not_future`,
+  `frequency_too_high`, `subagent_session`, …) in the model-readable message, and a deployment without the
+  `schedule` service says so instead of failing silently.
+
+### Compatibility
+
+- Additive only, so a minor release per the [status section](README.md#状态): the original 21 tool
+  names, their schemas, the resource URIs, the configuration fields and the MCP protocol surface are
+  unchanged; `dsh_status.toolNames` grows from 21 to 26.
+
+### Checks
+
+- 291 offline checks (14 new in `test/integration/schedule-tools.mjs`), plus the live HTTP and stdio suites.
+  Verified against a live Host: all seven timing selectors create, pause/resume works, a stale
+  `expectedUpdatedAt` returns `schedule_conflict`, a malformed rule returns `invalid_rule`, an external
+  caller is refused for `this_session`, and `dsh_schedule_run` delivers into the reserved session.
+
+### Note
+
+- 1.0.5 and 1.0.6 were published earlier the same day to unblock that rollout (the feature, then a
+  documentation correction to the timing shapes). This version carries the same code with consolidated
+  notes; upgrade to 1.1.0.
+
 ## [1.0.6] - 2026-11-09
 
 ### Fixed
