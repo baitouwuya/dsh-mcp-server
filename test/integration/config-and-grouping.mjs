@@ -494,6 +494,15 @@ try {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ preset: 'strict' }),
   })).json()
+  // A malformed allowlist must fail the load instead of silently leaving the
+  // fence open or the option ignored: the operator typed something wrong.
+  await check('a malformed allowedConfigOrigins fails the load', () => {
+    assert.throws(
+      () => apply(makeContext({}, []), { allowedConfigOrigins: ['not-an-origin'] }),
+      /absolute origins/,
+    )
+  })
+
   await check('the configuration route accepts a preset patch', () => {
     assert.equal(presetWrite.ok, true)
     assert.equal(configEdits().at(-1).next.preset, 'strict')
