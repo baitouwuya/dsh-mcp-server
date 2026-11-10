@@ -3,6 +3,20 @@
 Notable changes to `dsh-mcp-btwy`. Older releases are listed on
 [GitHub Releases](https://github.com/baitouwuya/dsh-mcp-server/releases).
 
+## [1.2.2] - 2026-11-11
+
+### Added
+
+- **Remote visual configuration through a reverse proxy** with `allowedConfigOrigins`. A configured
+  browser origin is aligned to the backend Host only for the existing Origin/Host comparison; the
+  loopback requirement, DSH browser authentication and cross-site checks remain active. Origins are
+  normalized and malformed entries fail at plugin load. Contributed by @SAXEM1997 in
+  [#6](https://github.com/baitouwuya/dsh-mcp-server/pull/6).
+
+### Checks
+
+- 311 offline checks, plus the documentation guard.
+
 ## [1.2.1] - 2026-11-10
 
 ### Fixed

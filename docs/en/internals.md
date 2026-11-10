@@ -88,9 +88,9 @@ node test/integration/sessions-and-identity.mjs    # 17 checks: waiting, whoami,
 node test/integration/archive-permissions-commands.mjs # 24 checks: archive, permissions, models, commands
 node test/integration/transcripts.mjs              # 11 checks: outline/tail/paging, index, search, budget
 node test/integration/decisions.mjs                # 20 checks: parked approvals/questions, per-kind answering, must-reply, busyMode
-node test/integration/config-and-grouping.mjs      # 32 checks: config route, presets, grouping, delivery, hot reload
+node test/integration/config-and-grouping.mjs      # 34 checks: config route, presets, grouping, delivery, hot reload
 node test/mcp-conformance-test.mjs                 # 26 checks: protocol versions, methods, errors, auth
-node test/client-half-test.mjs         # 18 checks: the browser half's bundle page, its row page, its route
+node test/client-half-test.mjs         # 38 checks: the browser half's bundle page, its row page, its route
 node test/streaming-transport-test.mjs  # 5 checks: the JSON reply, the SSE reply with keep-alives, a JSON-only client, a streamed error
 node test/stdio-stream-test.mjs         # 3 checks: the bridge parses an event stream and re-reads the endpoint file
 node test/stdio-bridge-test.mjs        # 4 checks, needs a RUNNING Harness (one real delegated turn)
