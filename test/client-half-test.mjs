@@ -421,7 +421,10 @@ checks.push('an unloaded sender still shows the short id, without a dead click')
 // operator can name that origin; nothing else about the fence changes.
 const LAN = 'http://192.168.50.216:23022'
 // Mirrors index.js configTrust for a browser-shaped request: Origin must match Host.
+const trustInputs = []
 const hostFence = (req) => {
+  trustInputs.push(req)
+  if (req.headers?.['sec-fetch-site'] === 'cross-site') return false
   const origin = req.headers?.origin
   if (typeof origin !== 'string') return true
   try {
@@ -451,7 +454,17 @@ checks.push('absent allowedConfigOrigins the route is unchanged')
 const allowed = await makeServer({ allowedOrigins: [LAN] })
 const allowHit = await fetch(allowed.base, { headers: { origin: LAN } })
 assert.equal(allowHit.status, 200, 'the operator-named origin reaches the settings route')
+assert.equal(trustInputs.at(-1).headers.origin, `http://${new URL(allowed.base).host}`, 'the trust function sees only an aligned Origin copy')
 checks.push('an allowlisted Origin is admitted, loopback still required')
+
+const denied = await makeServer({ allowedOrigins: [LAN], trust: () => false })
+const deniedHit = await fetch(denied.base, { headers: { origin: LAN } })
+assert.equal(deniedHit.status, 403, 'an allowlisted Origin cannot bypass the trust function')
+checks.push('an allowlisted Origin still requires the existing trust and authentication checks')
+
+const crossSite = await fetch(allowed.base, { headers: { origin: LAN, 'sec-fetch-site': 'cross-site' } })
+assert.equal(crossSite.status, 403, 'an allowlisted cross-site request is still refused')
+checks.push('an allowlisted cross-site request is refused')
 
 const allowMiss = await fetch(allowed.base, { headers: { origin: 'http://evil.example' } })
 assert.equal(allowMiss.status, 403, 'any other Origin is still refused')
@@ -467,6 +480,7 @@ checks.push('an allowlisted Origin may POST a patch too')
 
 await new Promise((resolve) => plain.srv.close(resolve))
 await new Promise((resolve) => allowed.srv.close(resolve))
+await new Promise((resolve) => denied.srv.close(resolve))
 
 await new Promise((resolve) => server.close(resolve))
 console.log(`${checks.length} client half checks passed`)

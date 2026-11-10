@@ -497,10 +497,23 @@ try {
   // A malformed allowlist must fail the load instead of silently leaving the
   // fence open or the option ignored: the operator typed something wrong.
   await check('a malformed allowedConfigOrigins fails the load', () => {
-    assert.throws(
-      () => apply(makeContext({}, []), { allowedConfigOrigins: ['not-an-origin'] }),
-      /absolute origins/,
-    )
+    for (const entry of ['not-an-origin', 'http://host:bad', 'http://host?x=1', 'https://user@host']) {
+      assert.throws(
+        () => apply(makeContext({}, []), { allowedConfigOrigins: [entry] }),
+        /absolute origins/,
+        entry,
+      )
+    }
+  })
+  await check('allowedConfigOrigins are normalized before comparison', () => {
+    return createPluginHarness({ applyOptions: { allowedConfigOrigins: ['http://NAS.local:80/'] } }).then(async (normalized) => {
+      try {
+        const response = await fetch(normalized.configUrl, { headers: { origin: 'http://nas.local' } })
+        assert.equal(response.status, 200, 'the browser origin matches the normalized configuration')
+      } finally {
+        await normalized.close()
+      }
+    })
   })
 
   await check('the configuration route accepts a preset patch', () => {

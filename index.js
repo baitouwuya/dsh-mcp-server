@@ -559,9 +559,9 @@ export function apply(ctx, config = {}) {
    * a reverse proxy that rewrites Host). Empty by default: absent this key the
    * route behaves exactly as before — Origin must equal Host.
    *
-   * Each entry must be an absolute `http(s)://host[:port]` origin; the leftover
-   * values are compared verbatim against `Origin`, so a typo fails closed (the
-   * page stays 403) instead of widening admission.
+   * Each entry must be a canonical absolute `http(s)://host[:port]` origin. The
+   * route compares the browser Origin to this normalized list, then aligns only
+   * that comparison for the reverse proxy while retaining DSH authentication.
    */
   const allowedConfigOrigins = (() => {
     const raw = config.allowedConfigOrigins
@@ -569,14 +569,21 @@ export function apply(ctx, config = {}) {
     if (!Array.isArray(raw)) {
       throw new Error('dsh-mcp-server: "allowedConfigOrigins" must be an array of absolute http(s) origins.')
     }
+    const normalized = []
     for (const entry of raw) {
-      if (typeof entry !== 'string' || !/^https?:\/\/[^/]+$/.test(entry)) {
+      let parsed
+      try { parsed = typeof entry === 'string' ? new URL(entry) : undefined } catch {
+        parsed = undefined
+      }
+      if (!parsed || !['http:', 'https:'].includes(parsed.protocol)
+        || parsed.username || parsed.password || parsed.pathname !== '/' || parsed.search || parsed.hash) {
         throw new Error(
           `dsh-mcp-server: "allowedConfigOrigins" entries must be absolute origins like "http://host:23022" (got ${JSON.stringify(entry)}).`,
         )
       }
+      normalized.push(parsed.origin)
     }
-    return [...new Set(raw)]
+    return [...new Set(normalized)]
   })()
 
   const disposeRoute = ctx.webServer.register({ kind: 'exact', path, handler })
