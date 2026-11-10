@@ -29,9 +29,19 @@ or, equivalently, `action: install_bundle` with the absolute package directory a
 install still uses the package name `dsh-mcp-btwy`: the npm name does not follow the checkout directory,
 and the row names in the patch follow the package name.
 
-The bundle's patch inserts **two rows**: `dsh-mcp-server` (the endpoint) and `dsh-work-sync` (task-start
-progress sync, see [progress sync](work-sync.md)). They are separate rows on purpose — sync can be disabled, reloaded or replaced without
-touching the endpoint, and a profile that omits it still serves MCP, reporting `sync.present: false`.
+This fork's patch inserts **one row**: `dsh-mcp-server` (the endpoint). Upstream also inserts
+`dsh-work-sync` (task-start progress sync, see [progress sync](work-sync.md)); it is not mounted by default here,
+because it makes every session that begins a task ask up to three peer sessions. The engine and the
+`dsh-mcp-btwy/work-sync` service still ship with the package — mount them explicitly when you want them:
+
+```yaml
+- insert:
+    - id: dsh-work-sync
+      name: 'dsh-mcp-btwy/work-sync'
+      config: {}
+```
+
+A profile without that row still serves MCP and reports `sync.present: false`.
 
 ### Self-check bundle (optional)
 
