@@ -554,6 +554,38 @@ export function apply(ctx, config = {}) {
   // itself (1 KB - 1 MB, 4 KB by default), so a malformed value cannot widen it.
   const configMaxBodyBytes = config.configMaxBodyBytes
 
+  /**
+   * Origins allowed to drive the settings page from outside loopback (e.g. behind
+   * a reverse proxy that rewrites Host). Empty by default: absent this key the
+   * route behaves exactly as before — Origin must equal Host.
+   *
+   * Each entry must be a canonical absolute `http(s)://host[:port]` origin. The
+   * route compares the browser Origin to this normalized list, then aligns only
+   * that comparison for the reverse proxy while retaining DSH authentication.
+   */
+  const allowedConfigOrigins = (() => {
+    const raw = config.allowedConfigOrigins
+    if (raw === undefined || raw === null) return []
+    if (!Array.isArray(raw)) {
+      throw new Error('dsh-mcp-server: "allowedConfigOrigins" must be an array of absolute http(s) origins.')
+    }
+    const normalized = []
+    for (const entry of raw) {
+      let parsed
+      try { parsed = typeof entry === 'string' ? new URL(entry) : undefined } catch {
+        parsed = undefined
+      }
+      if (!parsed || !['http:', 'https:'].includes(parsed.protocol)
+        || parsed.username || parsed.password || parsed.pathname !== '/' || parsed.search || parsed.hash) {
+        throw new Error(
+          `dsh-mcp-server: "allowedConfigOrigins" entries must be absolute origins like "http://host:23022" (got ${JSON.stringify(entry)}).`,
+        )
+      }
+      normalized.push(parsed.origin)
+    }
+    return [...new Set(normalized)]
+  })()
+
   const disposeRoute = ctx.webServer.register({ kind: 'exact', path, handler })
 
   /**
@@ -753,6 +785,7 @@ export function apply(ctx, config = {}) {
         queueSession: queueOpenSession,
         ackCommand: async () => { guiCommand = undefined },
         trust: configTrust,
+        allowedOrigins: allowedConfigOrigins,
         maxBodyBytes: configMaxBodyBytes,
         logger: log,
       }),
