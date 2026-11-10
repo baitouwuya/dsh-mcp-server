@@ -76,7 +76,7 @@ What a calling model sees, and why it was shaped that way:
 node test/mcp-self-test.mjs            # 11 transport checks, no Harness needed
 node test/contracts-test.mjs           # 6 checks: the Harness wire shapes, pinned in one place
 node test/authority-test.mjs           # 5 checks: the sandbox ladder, containment, and the cwd clamp
-node test/transcript-test.mjs          # 7 checks: transcript windows, cursors, caps and the response budget
+node test/transcript-test.mjs          # 16 checks: message/event windows, cursors, maxChars:0 and the response budget
 node test/questions-test.mjs           # 17 checks: must-reply ids, injected id-only reminders, human stops, answers, deadlines, aborts, deadlocks
 node test/work-sync-test.mjs           # 22 checks: the progress-sync engine against a fake Harness
 node test/work-sync-plugin-test.mjs    # 5 checks: the sync bundle row's service, messages, switch, disposal

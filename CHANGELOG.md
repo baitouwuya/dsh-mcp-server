@@ -3,6 +3,25 @@
 Notable changes to `dsh-mcp-btwy`. Older releases are listed on
 [GitHub Releases](https://github.com/baitouwuya/dsh-mcp-server/releases).
 
+## [1.2.1] - 2026-11-10
+
+### Fixed
+
+- **`maxChars: 0` preserves event text** in `dsh_read_session` with `mode: "events"`, matching the
+  documented contract and the message modes. Version 1.2.0 treated zero as a literal limit and returned
+  empty text with truncation markers. The default 2,000-character limit, positive limits, response budget
+  and cursor behavior are unchanged. Contributed by @SAXEM1997 in
+  [#5](https://github.com/baitouwuya/dsh-mcp-server/pull/5), fixing
+  [#4](https://github.com/baitouwuya/dsh-mcp-server/issues/4).
+
+### Checks
+
+- 303 offline checks, including the new `maxChars: 0` regression, plus the documentation guard.
+- Installed the fix locally before release and restarted DSH: a live MCP read returned a 10,137-character
+  event in full with `maxChars: 0`, 2,000 characters by default and 100 with an explicit limit. A separate
+  installed-module probe confirmed that a 600,000-character event still respects the total budget and
+  advances the cursor.
+
 ## [1.2.0] - 2026-11-10
 
 ### Added
