@@ -65,6 +65,8 @@ export function makeServices() {
   const runningSessions = new Set()
   const extraSessions = []
   const titleOverrides = new Map()
+  const controllerListCalls = []
+  const titleLookups = []
   let hang = false
 
   /** Append synthetic transcript events, so read windows have something to page through. */
@@ -288,7 +290,8 @@ export function makeServices() {
       cancelledSessions.push(request?.sessionId)
       return { accepted: true }
     },
-    async list() {
+    async list(signal) {
+      controllerListCalls.push({ signal: signal !== undefined })
       return {
         items: [
           {
@@ -319,6 +322,7 @@ export function makeServices() {
       return { session: { cwd: '/tmp', createdAt: Date.now() }, events, inheritedEventCount: 0 }
     },
     async readTitleSnapshots(ids) {
+      titleLookups.push([...ids])
       return ids.map((id) => ({
         sessionId: id,
         status: 'fulfilled',
@@ -326,7 +330,21 @@ export function makeServices() {
       }))
     },
     async listSessions() {
-      return [{ header: { id: currentSessionId }, live: true, persisted: true }]
+      // Header-only rows, newest created first, exactly as the Host's query
+      // service returns them: no projections, no activity time.
+      const rows = [
+        { header: { id: currentSessionId, cwd: '/tmp', createdAt: 1_700_000_000_000 }, live: true, persisted: true },
+        ...extraSessions.map((entry, index) => ({
+          header: {
+            id: entry.sessionId,
+            cwd: entry.cwd ?? '/tmp',
+            createdAt: 1_700_000_000_000 - (index + 1) * 1000,
+          },
+          live: false,
+          persisted: true,
+        })),
+      ]
+      return rows
     },
   }
 
@@ -648,6 +666,8 @@ export function makeServices() {
     setCallerMode: (mode) => { callerMode = mode },
     setCallerPreset: (preset) => { callerPreset = preset },
     setLiveAuto: (value) => { liveAuto = value === true },
+    controllerListCalls: () => [...controllerListCalls],
+    titleLookups: () => titleLookups.map((ids) => [...ids]),
     scheduleCalls: () => [...scheduleCalls],
     scheduleTasks: () => [...scheduleTasks.values()].map((task) => ({ ...task })),
     dropService: (name) => { delete services[name] },

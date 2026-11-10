@@ -3,6 +3,30 @@
 Notable changes to `dsh-mcp-btwy`. Older releases are listed on
 [GitHub Releases](https://github.com/baitouwuya/dsh-mcp-server/releases).
 
+## [1.1.1] - 2026-11-10
+
+### Fixed
+
+- **`dsh_list_sessions` stops paying for what a page does not use** (issue #2). Two costs sat in the
+  default path: the controller summarizes every session with its projections to sort by last activity,
+  and every returned row resolved its title through the Host. On this machine's 890-session library a
+  200-row page took **5.4 s** — almost all of it title lookups (≈26 ms/row) — while the header-only
+  catalogue answered in milliseconds.
+  - `titles: false` skips the per-row title lookup; rows carry no `title`.
+  - `order: "created"` reads `sessionQuery.listSessions()` (detached headers, newest created first) instead
+    of the projection pass. Rows then carry `createdAt` and no `updatedAt`; `running` still comes from the
+    live agent registry. A deployment that mounts no `sessionQuery` falls back to activity order and the
+    payload says `orderFallback: true`.
+  - Both defaults are unchanged (`order: "activity"`, `titles: true`), so existing callers see the same
+    rows; a collector can now walk a whole library without a second per page.
+- The controller's cancellation signal is passed where the Host expects it (`controller.list(signal)`
+  rather than `controller.list({}, signal)`), so a caller that hangs up now cancels the listing too.
+
+### Checks
+
+- 294 offline checks (3 new in `test/integration/sessions-and-identity.mjs`: the header catalogue skips
+  the projection pass and titles, the default keeps activity order, and the fallback is reported).
+
 ## [1.1.0] - 2026-11-09
 
 ### Added
