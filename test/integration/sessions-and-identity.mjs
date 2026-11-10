@@ -150,6 +150,45 @@ try {
     assert.deepEqual(claudeMine.sessions, [])
   })
 
+  h.addSyntheticSessions([
+    { sessionId: 'session-fast-a', cwd: '/tmp/a', title: 'Fast A' },
+    { sessionId: 'session-fast-b', cwd: '/tmp/b', title: 'Fast B' },
+  ])
+  const listCallsBefore = h.controllerListCalls().length
+  const titleCallsBefore = h.titleLookups().length
+  const fast = await call('dsh_list_sessions', { order: 'created', titles: false, limit: 10 })
+  await check('order: "created" reads the header-only catalogue and skips titles', () => {
+    assert.equal(fast.order, 'created')
+    assert.equal(fast.titles, false)
+    assert.equal(h.controllerListCalls().length, listCallsBefore, 'no full projection pass')
+    assert.equal(h.titleLookups().length, titleCallsBefore, 'no per-row title lookup')
+    assert.ok(fast.sessions.length >= 3, 'the header catalogue still lists every session')
+    assert.equal(fast.sessions.some((row) => row.title !== undefined), false)
+    assert.equal(fast.sessions.every((row) => typeof row.createdAt === 'string' && row.updatedAt === undefined), true)
+    const stamps = fast.sessions.map((row) => Date.parse(row.createdAt))
+    assert.deepEqual([...stamps].sort((a, b) => b - a), stamps, 'header rows keep the newest-created-first order')
+  })
+
+  const titleCalls = h.titleLookups().length
+  const activity = await call('dsh_list_sessions', { limit: 5 })
+  await check('the default stays the activity order, with titles and updatedAt', () => {
+    assert.equal(activity.order, 'activity')
+    assert.equal(activity.titles, true)
+    assert.ok(h.titleLookups().length > titleCalls, 'the default page still resolves titles')
+    assert.equal(typeof activity.sessions[0].updatedAt, 'string')
+    assert.equal(typeof activity.sessions[0].title, 'string')
+  })
+
+  const queryService = h.services.sessionQuery
+  delete h.services.sessionQuery
+  const fallback = await call('dsh_list_sessions', { order: 'created', titles: false, limit: 3 })
+  h.services.sessionQuery = queryService
+  await check('a deployment without sessionQuery falls back to activity order and says so', () => {
+    assert.equal(fallback.order, 'activity')
+    assert.equal(fallback.orderFallback, true)
+    assert.equal(typeof fallback.sessions[0].updatedAt, 'string')
+  })
+
   await new Promise((resolve) => setTimeout(resolve, 80))
   const persisted = createClientRegistry({ file: join(h.dir, 'mcp', 'dsh-mcp-clients.json') })
   persisted.load()
