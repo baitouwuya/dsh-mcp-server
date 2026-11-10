@@ -176,5 +176,55 @@ assert.deepEqual(toolOnly.events.map((row) => row.type), ['tool/call', 'tool/res
 assert.equal(toolOnly.matchedEvents, 2)
 checks.push('events mode can select the tool traffic alone')
 
+// --- events mode bounds the response, not just the prose --------------------
+// A boundary probe: what the budget must actually charge is the serialized
+// payload, and one oversized event must still make progress.
+function readerFor(events) {
+  const ctx = {
+    get(name) {
+      if (name !== 'sessionQuery') return undefined
+      return {
+        async readSession() {
+          return { session: { cwd: '/work' }, events }
+        },
+      }
+    },
+  }
+  return createTranscriptReader({ ctx })
+}
+
+const heavyEvents = [{
+  type: 'assistant/message',
+  seq: 1,
+  time: 1,
+  data: { message: { content: [{ type: 'text', text: 'see image' }, { type: 'image', mediaType: 'image/png', data: 'A'.repeat(2_000_000) }] } },
+}]
+const heavy = await readerFor(heavyEvents).readTranscript('session-heavy', { mode: 'events', limit: 10 })
+assert.equal(heavy.returned, 1, 'a row with a huge payload still comes back')
+assert.equal(heavy.events[0].dataOmitted, true, 'the payload is dropped rather than smuggling 2 MB through the budget')
+assert.equal(heavy.events[0].dataChars > 1_000_000, true, 'the dropped payload reports its real size')
+assert.ok(JSON.stringify(heavy).length < 20_000, 'the whole response stays bounded')
+checks.push('events mode budgets the serialized payload, not just the prose')
+
+const hugeOnce = [{ type: 'tool/result', seq: 7, time: 1, data: { output: 'x'.repeat(600_000) } }]
+const firstPage = await readerFor(hugeOnce).readTranscript('session-huge', { mode: 'events', limit: 10 })
+assert.equal(firstPage.returned, 1, 'an occurrence larger than the budget is not silently skipped')
+assert.equal(firstPage.events[0].truncated, true)
+assert.equal(firstPage.events[0].chars, 600_000, 'the row reports its uncut length')
+assert.equal(firstPage.window.nextAfterSeq, 7, 'the cursor advances past the oversized occurrence')
+assert.equal(firstPage.window.reachedEnd, true)
+const afterPage = await readerFor(hugeOnce).readTranscript('session-huge', { mode: 'events', afterSeq: 7 })
+assert.equal(afterPage.returned, 0)
+assert.equal(afterPage.window.reachedEnd, true, 'the caller is told the page was the last one')
+checks.push('events mode always advances, so paging cannot stall on one huge event')
+
+const longOutput = [{ type: 'tool/result', seq: 2, time: 1, data: { output: 'y'.repeat(50_000) } }]
+const cappedEvent = await readerFor(longOutput).readTranscript('session-long', { mode: 'events', limit: 10, maxChars: 100 })
+assert.equal(cappedEvent.events[0].text.length, 100, 'maxChars caps one event row like one message')
+assert.equal(cappedEvent.events[0].truncated, true)
+assert.equal(cappedEvent.events[0].chars, 50_000)
+assert.equal(cappedEvent.events[0].data.output.length, 50_000, 'the payload still travels while it fits the budget')
+checks.push('events mode honors maxChars per row')
+
 console.log(`${checks.length} transcript checks passed`)
 for (const check of checks) console.log(`ok - ${check}`)
