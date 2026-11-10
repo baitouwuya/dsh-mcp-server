@@ -3,6 +3,34 @@
 Notable changes to `dsh-mcp-btwy`. Older releases are listed on
 [GitHub Releases](https://github.com/baitouwuya/dsh-mcp-server/releases).
 
+## [1.2.0] - 2026-11-10
+
+### Added
+
+- **`dsh_read_session` can read the raw log** — contributed by @SAXEM1997 in
+  [#3](https://github.com/baitouwuya/dsh-mcp-server/pull/3). `mode: "events"` returns `events[]` instead of
+  folded messages, so `tool/call`, `tool/result`, and `permission/preset` rows are readable: a caller that
+  audits what a run actually did no longer loses roughly two thirds of the log. The window arithmetic is the
+  message modes' own — `limit`, `afterSeq` + `window.nextAfterSeq`, `reachedEnd` — and `types` narrows by
+  event type *before* the window is cut, so `matchedEvents` counts what the filter matched. Rows carry
+  `truncated`/`chars` like message rows, and the whole response stays inside the ~512K-character budget.
+- Raw payloads travel verbatim, which is the point and the caveat: a `tool/call` argument can hold a secret
+  the folded prose view hides. The endpoint token already implies execution (`dsh_run_prompt` can run a
+  shell), so the mode ships documented rather than gated.
+
+### Fixed
+
+- Review follow-ups on the contributed mode: the budget now charges the serialized event payload as well as
+  the row text (a 2 MB inline image used to slip through with `truncatedByBudget: false`); the window's first
+  row is always returned, truncated to what still fits, so `nextAfterSeq` advances and a single oversized
+  event can no longer yield an empty page that pages forever; `maxChars` caps one event row like one message;
+  and an unused import plus the missing bilingual docs were cleaned up.
+
+### Checks
+
+- 302 offline checks (5 new in `test/transcript-test.mjs` with the mode, 3 more for the budget/progress/
+  `maxChars` fixes), plus the live HTTP and stdio suites.
+
 ## [1.1.1] - 2026-11-10
 
 ### Fixed
