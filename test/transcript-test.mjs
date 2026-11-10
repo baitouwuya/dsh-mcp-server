@@ -150,6 +150,16 @@ assert.equal(rawEvents.matchedEvents, 5)
 assert.equal('messages' in rawEvents, false, 'events mode does not also fold messages')
 checks.push('events mode returns the raw log, tool calls included')
 
+// `maxChars: 0` is documented as "full text" — the message view honours it
+// (`maxChars > 0` guards the cut), so events mode must agree. Reading it as a
+// literal cap of zero blanks every row instead, which looks like a successful
+// read of an empty log.
+const fullTextEvents = await tools.readTranscript('session-tools', { mode: 'events', maxChars: 0, limit: 10 })
+assert.equal(fullTextEvents.events[4].text, 'done', 'maxChars 0 keeps the whole row text')
+assert.equal('truncated' in fullTextEvents.events[4], false, 'and reports nothing as truncated')
+assert.equal('chars' in fullTextEvents.events[4], false)
+checks.push('events mode reads maxChars 0 as full text, like the message view')
+
 const tailEvents = await tools.readTranscript('session-tools', { mode: 'events', limit: 2 })
 assert.deepEqual(tailEvents.events.map((row) => row.seq), [4, 5], 'events mode windows from the tail')
 assert.equal(tailEvents.returned, 2)
