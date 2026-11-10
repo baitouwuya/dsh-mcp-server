@@ -28,7 +28,16 @@ plugin_manager install_bundle --target /path/to/dsh-mcp-server
 或者等价地，使用 `action: install_bundle`，并把插件包的绝对目录作为 `target`。源码安装时包名仍然是
 `dsh-mcp-btwy`——npm 名和仓库目录无关，patch 里的行名跟着包名走。
 
-插件包的 patch 会插入**两行**：`dsh-mcp-server`（端点）和 `dsh-work-sync`（任务启动进度同步，见[进度同步](work-sync.md)）。它们被刻意做成两个独立的行——同步可以禁用、重载或替换，而不影响端点；省略它的配置档案仍然提供 MCP 服务，并报告 `sync.present: false`。
+本 fork 的 patch 只插入**一行**：`dsh-mcp-server`（端点）。上游还会一并插入 `dsh-work-sync`（任务启动进度同步，见[进度同步](work-sync.md)）——这里不默认挂载，因为它会让每个开始任务的会话向最多 3 个同伴会话发一次询问。引擎与 `dsh-mcp-btwy/work-sync` 服务仍随包发布，需要时在配置档案里显式挂回：
+
+```yaml
+- insert:
+    - id: dsh-work-sync
+      name: 'dsh-mcp-btwy/work-sync'
+      config: {}
+```
+
+没有挂载的配置档案照常提供 MCP 服务，并报告 `sync.present: false`。
 
 ### 自检插件包（可选）
 
