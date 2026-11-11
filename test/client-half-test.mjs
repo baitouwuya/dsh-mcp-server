@@ -62,6 +62,7 @@ checks.push('the client half requires React and the Harness UI primitives, nothi
 
 // --- the row configuration page ----------------------------------------------
 const registrations = []
+const insertedStyles = []
 const slots = {
   inject: (_name, callback) => { callback(); return () => {} },
   register: (options, component) => {
@@ -70,10 +71,17 @@ const slots = {
   },
 }
 const ctx = {
-  get: (name) => (name === 'slots' ? slots : undefined),
+  get: (name) => name === 'slots'
+    ? slots
+    : name === 'styles'
+      ? { insert: (css) => insertedStyles.push(css) }
+      : undefined,
   effect: (create) => create(),
 }
 exported.apply(ctx)
+
+assert.match(insertedStyles.join('\n'), /\.dsh-mcp-trigger-head \{[^}]*box-sizing: border-box;/, 'the trigger header keeps its disclosure arrow inside the card')
+checks.push('the wake-card header box model keeps the disclosure arrow inside the card')
 
 assert.equal(registrations.length, 4, 'the client half registers the bundle page, the row page, the wake card and the origin line')
 const page = registrations.find((entry) => entry.options.name === 'plugins.row.config')
