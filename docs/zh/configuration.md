@@ -68,7 +68,7 @@
 | `createGroups` | `false` | 允许本端点为没有项目的目录新建一个侧边栏项目。默认关闭：自动化不会自行扩张侧边栏，目录没有项目的会话仍留在 Ungrouped。 |
 | `busyMode` | `setting` | 发给已在运行的会话的投递方式：`setting` 跟随部署自己的 `ui-conversation.busyEnter`，`queue` 总是等到下一回合，`steer` 总是在回合中注入。调用方的 `mode` 参数优先于这三者。 |
 | `syncEntryId` | `dsh-work-sync` | 设置页写入任务启动同步开关的配置档案行。 |
-| `dsh-work-sync` → `syncOnStart` | `true` | **在同步行上**：任务开始时，询问同一工作区中其他智能体在做什么、在动哪些文件。插件页的开关保存的就是这一行。 |
+| `dsh-work-sync` → `syncOnStart` | `true` | **在同步行上**：任务开始时，独立评估是否需要向同一工作区的智能体同步进度。插件页的开关保存的就是这一行。 |
 | `dsh-work-sync` → `syncCooldownMs` | `300000` | 同一会话在再次询问同一同伴之前等待多久。 |
 | `dsh-work-sync` → `syncWaitMs` | `120000` | 等待同伴的报告多久之后，告知提问方对方仍在工作。 |
 | `dsh-work-sync` → `syncMaxPeers` | `3` | 一轮最多可以问多少个同伴。 |

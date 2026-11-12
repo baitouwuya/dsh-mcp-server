@@ -12,7 +12,7 @@ import { createWorkSync } from '../lib/work-sync.js'
 const checks = []
 
 /** One engine, one fake Harness, one injectable clock. */
-function harness({ rows = [], enabled = true, cooldownMs = 300_000, waitMs = 120_000, maxPeers = 3, steered = false, defer = null, deliverResult = undefined, guard = null } = {}) {
+function harness({ rows = [], enabled = true, cooldownMs = 300_000, waitMs = 120_000, maxPeers = 3, steered = false, defer = null, deliverResult = undefined, guard = null, evaluate = async ({ peers }) => peers } = {}) {
   const handlers = new Map()
   const delivered = []
   const logs = []
@@ -28,6 +28,7 @@ function harness({ rows = [], enabled = true, cooldownMs = 300_000, waitMs = 120
     settings: { enabled, cooldownMs, waitMs, maxPeers },
     logger: (level, message, detail) => logs.push({ level, message, detail }),
     listSessions: async () => rows,
+    evaluate,
     deliver: async (target, message) => {
       // Model the Harness's session-append reentry guard: a delivery made from
       // inside a session/event listener must wait for the commit to close.
@@ -44,11 +45,21 @@ function harness({ rows = [], enabled = true, cooldownMs = 300_000, waitMs = 120
   })
   sync.start()
   const fire = (event) => handlers.get('session/event')?.({ id: event.sessionId, header: { id: event.sessionId } }, event)
+  const start = (sessionId, turn = 1) => fire({ sessionId, type: 'turn/start', data: { turn } })
+  const prompt = (sessionId, text = 'edit the shared project') => fire({ sessionId, type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'text', text }] } })
+  const stream = (sessionId, purpose) => handlers.get('llm/stream')?.({ sessionId, provider: 'mock', model: 'mock', purpose }, () => undefined)
   return {
     sync,
     delivered,
     logs,
-    turn: (sessionId, turn = 1) => fire({ sessionId, type: 'turn/start', data: { turn } }),
+    start,
+    prompt,
+    stream,
+    turn: async (sessionId, turn = 1) => {
+      await start(sessionId, turn)
+      await prompt(sessionId)
+      stream(sessionId)
+    },
     end: (sessionId, turn = 1) => fire({ sessionId, type: 'turn/end', data: { turn, reason: { kind: 'completed' } } }),
     message: (sessionId, text, turn = 1, step = 1) => fire({ sessionId, type: 'assistant/message', data: { turn, step, message: { content: [{ type: 'text', text }] } } }),
     claim: (sessionId, asker) => fire({
@@ -202,6 +213,108 @@ await off.settle()
 assert.equal(off.delivered.length, 0, 'with the switch off nothing is delivered')
 assert.equal(off.sync.status().enabled, false)
 checks.push('the switch stops every notice')
+
+// Only the peers selected by the evaluator receive automatic notices.
+const decisions = []
+const selective = harness({
+  rows: [
+    { sessionId: 'asker', running: true, cwd: '/work' },
+    { sessionId: 'peer-a', running: true, cwd: '/work' },
+    { sessionId: 'peer-b', running: true, cwd: '/work' },
+  ],
+  evaluate: async (request) => { decisions.push(request); return ['peer-b', 'outside'] },
+})
+await selective.turn('asker')
+await selective.settle()
+assert.deepEqual(ids(selective.delivered), ['peer-b'])
+assert.equal(decisions[0].task, 'edit the shared project')
+assert.deepEqual(decisions[0].route, { provider: 'mock', model: 'mock' })
+checks.push('automatic sync asks only an eligible peer selected for the current task')
+
+const declined = harness({ rows: world, evaluate: async () => [] })
+await declined.turn('asker')
+await declined.settle()
+assert.deepEqual(declined.delivered, [])
+checks.push('an evaluator decision that no coordination is needed sends nothing')
+
+let evaluationCount = 0
+const timing = harness({ rows: world, evaluate: async () => { evaluationCount += 1; return [] } })
+await timing.start('asker')
+await timing.settle()
+assert.equal(evaluationCount, 0, 'turn/start precedes the task message')
+await timing.prompt('asker', 'the current task')
+timing.stream('asker', 'session-title')
+await timing.settle()
+assert.equal(evaluationCount, 0, 'an auxiliary title request must not consume the task')
+timing.stream('asker')
+await timing.settle()
+assert.equal(evaluationCount, 1, 'the current main request starts the evaluation')
+checks.push('evaluation waits for the task and the main model request')
+
+let emptyPeerEvaluations = 0
+const alone = harness({ rows: [world[0]], evaluate: async () => { emptyPeerEvaluations += 1; return [] } })
+await alone.turn('asker')
+await alone.settle()
+assert.equal(emptyPeerEvaluations, 0)
+checks.push('a session with no eligible peers makes no auxiliary model call')
+
+let releaseEvaluation
+let evaluationSignal
+const slowEvaluation = harness({
+  rows: world,
+  evaluate: ({ signal }) => {
+    evaluationSignal = signal
+    return new Promise((resolve) => { releaseEvaluation = () => resolve(['peer']) })
+  },
+})
+await slowEvaluation.turn('asker')
+await slowEvaluation.settle()
+await slowEvaluation.end('asker')
+assert.equal(evaluationSignal.aborted, true)
+releaseEvaluation()
+await slowEvaluation.settle()
+assert.deepEqual(slowEvaluation.delivered, [])
+checks.push('a decision arriving after the task ends cannot send a notice')
+
+let releaseOldDecision
+let decisionCalls = 0
+const nextTurn = harness({
+  rows: world,
+  evaluate: ({ peers }) => {
+    decisionCalls += 1
+    return decisionCalls === 1
+      ? new Promise((resolve) => { releaseOldDecision = () => resolve(peers) })
+      : Promise.resolve(peers)
+  },
+})
+await nextTurn.turn('asker', 1)
+await nextTurn.settle()
+await nextTurn.end('asker', 1)
+await nextTurn.turn('asker', 2)
+await nextTurn.settle()
+assert.equal(decisionCalls, 2, 'the next task is evaluated while the cancelled decision is settling')
+assert.deepEqual(ids(nextTurn.delivered), ['peer'])
+releaseOldDecision()
+await nextTurn.settle()
+assert.deepEqual(ids(nextTurn.delivered), ['peer'], 'the old decision cannot send another notice')
+checks.push('a new turn supersedes a still-settling evaluation')
+
+let finishPeerDecision
+const changingRows = [
+  { sessionId: 'asker', running: true, cwd: '/work' },
+  { sessionId: 'peer', running: true, cwd: '/work' },
+]
+const peerFinished = harness({
+  rows: changingRows,
+  evaluate: () => new Promise((resolve) => { finishPeerDecision = () => resolve(['peer']) }),
+})
+await peerFinished.turn('asker')
+await peerFinished.settle()
+changingRows[1].running = false
+finishPeerDecision()
+await peerFinished.settle()
+assert.deepEqual(peerFinished.delivered, [])
+checks.push('a peer that finished while the evaluator ran is not woken')
 
 // --- a peer that never answers ----------------------------------------------
 const silent = harness({ rows: world, waitMs: 25 })

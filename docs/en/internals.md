@@ -24,7 +24,8 @@ ships imports a DSH package, so every layer talks through `ctx` and plain data.
 | [`lib/config-route.js`](../../lib/config-route.js) + [`lib/client.js`](../../lib/client.js) | Control plane: a loopback JSON route and the browser panel that reads and writes it — rendered on the bundle's own Plugins page (above its component rows) and as the row's Configure page. |
 | [`lib/transcript.js`](../../lib/transcript.js) | Windowed transcript reads: tail/head/outline, role and sequence filters, per-message caps and the response budget. |
 | [`work-sync.js`](../../work-sync.js) | The **second bundle row**: mounts task-start progress sync, publishes it as the `workSync` service, and owns its own config. |
-| [`lib/work-sync.js`](../../lib/work-sync.js) | The sync engine itself: who to ask, claim correlation, deadlines — built only on `session/event`. |
+| [`lib/work-sync.js`](../../lib/work-sync.js) | The sync engine: turn and model-request timing, peer filtering, report correlation and deadlines. |
+| [`lib/work-sync-evaluator.js`](../../lib/work-sync-evaluator.js) | Separate model request selecting peers from the current task and their recent messages. |
 | [`lib/questions.js`](../../lib/questions.js) | Must-reply questions: the id, the blocking wait, id-only reminders injected into the target's own calls, human-stop settlement, the answer, and deadlock/abort handling — delivery and the clock are injected. |
 | [`lib/workspace-grouping.js`](../../lib/workspace-grouping.js) | Put a session this endpoint starts into the sidebar project its directory already has. |
 
@@ -78,19 +79,21 @@ node test/contracts-test.mjs           # 6 checks: the Harness wire shapes, pinn
 node test/authority-test.mjs           # 5 checks: the sandbox ladder, containment, and the cwd clamp
 node test/transcript-test.mjs          # 16 checks: message/event windows, cursors, maxChars:0 and the response budget
 node test/questions-test.mjs           # 17 checks: must-reply ids, injected id-only reminders, human stops, answers, deadlines, aborts, deadlocks
-node test/work-sync-test.mjs           # 22 checks: the progress-sync engine against a fake Harness
+node test/work-sync-evaluator-test.mjs # 4 checks: independent model decision and peer selection
+node test/work-sync-test.mjs           # 29 checks: the progress-sync engine against a fake Harness
 node test/work-sync-plugin-test.mjs    # 5 checks: the sync bundle row's service, messages, switch, disposal
 node test/turn-wait-test.mjs          # 2 checks: which turn a queued or steered prompt reports
 node test/integration/protocol-and-tools.mjs       # 32 checks: apply(), endpoint file, tools, status, the
                                                    # lazy front door, its authority ceiling, the reserved
                                                    # presets, lossless values
-node test/integration/sessions-and-identity.mjs    # 17 checks: waiting, whoami, ownership, restrictToOwner
+node test/integration/sessions-and-identity.mjs    # 20 checks: waiting, whoami, ownership, restrictToOwner
 node test/integration/archive-permissions-commands.mjs # 24 checks: archive, permissions, models, commands
 node test/integration/transcripts.mjs              # 11 checks: outline/tail/paging, index, search, budget
 node test/integration/decisions.mjs                # 20 checks: parked approvals/questions, per-kind answering, must-reply, busyMode
 node test/integration/config-and-grouping.mjs      # 34 checks: config route, presets, grouping, delivery, hot reload
+node test/integration/schedule-tools.mjs           # 14 checks: schedule creation, reading, updates, delivery
 node test/mcp-conformance-test.mjs                 # 26 checks: protocol versions, methods, errors, auth
-node test/client-half-test.mjs         # 38 checks: the browser half's bundle page, its row page, its route
+node test/client-half-test.mjs         # 40 checks: the browser half's bundle page, its row page, its route
 node test/streaming-transport-test.mjs  # 5 checks: the JSON reply, the SSE reply with keep-alives, a JSON-only client, a streamed error
 node test/stdio-stream-test.mjs         # 3 checks: the bridge parses an event stream and re-reads the endpoint file
 node test/stdio-bridge-test.mjs        # 4 checks, needs a RUNNING Harness (one real delegated turn)

@@ -42,6 +42,11 @@ function mount({ config = {}, running = true } = {}) {
       resolveAgent: async (sessionId) => ({ agent: handle(sessionId) }),
     },
     agents: { get: (sessionId) => handle(sessionId) },
+    sessions: { get: () => ({ snapshotEvents: () => [] }) },
+    llm: { prepareCall: async (config) => ({ config, stream: async function* () {
+      yield { type: 'text-delta', index: 0, text: '{"peers":["peer"]}' }
+      yield { type: 'finish', reason: { kind: 'stop' } }
+    } }) },
     configEditor: { entries: () => [{ options: { id: 'ui-conversation', config: { busyEnter: 'queue' } } }] },
   }
 
@@ -84,6 +89,8 @@ checks.push('mounting the row publishes a workSync service with its config')
 
 // --- one round ---------------------------------------------------------------
 mounted.fire('asker', { type: 'turn/start', data: { turn: 1 } })
+mounted.fire('asker', { type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'text', text: 'change shared code' }] } })
+mounted.hooks.get('llm/stream')({ sessionId: 'asker', provider: 'mock', model: 'mock' }, () => undefined)
 await mounted.settle()
 assert.equal(mounted.delivered.length, 1, 'a starting task asks the other running root in its workspace')
 const notice = mounted.delivered[0]
@@ -107,6 +114,8 @@ checks.push('a claimed answer comes back to the asker as one labelled report')
 // --- the switch --------------------------------------------------------------
 const off = mount({ config: { syncOnStart: false } })
 off.fire('asker', { type: 'turn/start', data: { turn: 1 } })
+off.fire('asker', { type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'text', text: 'change shared code' }] } })
+off.hooks.get('llm/stream')({ sessionId: 'asker', provider: 'mock', model: 'mock' }, () => undefined)
 await off.settle()
 assert.deepEqual(off.delivered, [], 'with syncOnStart: false the row asks nobody')
 assert.equal(off.service.config.enabled, false)

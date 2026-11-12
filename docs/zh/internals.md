@@ -23,7 +23,8 @@
 | [`lib/config-route.js`](../../lib/config-route.js) + [`lib/client.js`](../../lib/client.js) | 控制平面：一条回环 JSON 路由，以及读写它的浏览器面板——渲染在插件包自己的插件页上（位于其组件行上方），同时也作为该行的 Configure 页面。 |
 | [`lib/transcript.js`](../../lib/transcript.js) | 窗口化对话记录读取：tail/head/outline、按角色和序号过滤、单条消息上限以及响应预算。 |
 | [`work-sync.js`](../../work-sync.js) | **第二个插件包行**：挂载任务启动进度同步，将其发布为 `workSync` 服务，并管理自己的配置。 |
-| [`lib/work-sync.js`](../../lib/work-sync.js) | 同步引擎本身：向谁询问、认领关联、截止时间——只建立在 `session/event` 之上。 |
+| [`lib/work-sync.js`](../../lib/work-sync.js) | 同步引擎：回合与模型请求时序、候选筛选、报告关联和截止时间。 |
+| [`lib/work-sync-evaluator.js`](../../lib/work-sync-evaluator.js) | 独立模型请求：结合任务及同伴近期消息选择需要同步的会话。 |
 | [`lib/questions.js`](../../lib/questions.js) | 必须回复的问题：id、阻塞等待、注入到目标自身调用中的仅含 id 的提醒、人工停止的结算、答案，以及死锁/中止处理——投递与时钟都是注入的。 |
 | [`lib/workspace-grouping.js`](../../lib/workspace-grouping.js) | 把该端点启动的会话放入其目录已经所属的侧边栏项目。 |
 
@@ -53,19 +54,21 @@ node test/contracts-test.mjs           # 6 checks: the Harness wire shapes, pinn
 node test/authority-test.mjs           # 5 checks: the sandbox ladder, containment, and the cwd clamp
 node test/transcript-test.mjs          # 16 checks: message/event windows, cursors, maxChars:0 and the response budget
 node test/questions-test.mjs           # 17 checks: must-reply ids, injected id-only reminders, human stops, answers, deadlines, aborts, deadlocks
-node test/work-sync-test.mjs           # 22 checks: the progress-sync engine against a fake Harness
+node test/work-sync-evaluator-test.mjs # 4 checks: independent model decision and peer selection
+node test/work-sync-test.mjs           # 29 checks: the progress-sync engine against a fake Harness
 node test/work-sync-plugin-test.mjs    # 5 checks: the sync bundle row's service, messages, switch, disposal
 node test/turn-wait-test.mjs          # 2 checks: which turn a queued or steered prompt reports
 node test/integration/protocol-and-tools.mjs       # 32 checks: apply(), endpoint file, tools, status, the
                                                    # lazy front door, its authority ceiling, the reserved
                                                    # presets, lossless values
-node test/integration/sessions-and-identity.mjs    # 17 checks: waiting, whoami, ownership, restrictToOwner
+node test/integration/sessions-and-identity.mjs    # 20 checks: waiting, whoami, ownership, restrictToOwner
 node test/integration/archive-permissions-commands.mjs # 24 checks: archive, permissions, models, commands
 node test/integration/transcripts.mjs              # 11 checks: outline/tail/paging, index, search, budget
 node test/integration/decisions.mjs                # 20 checks: parked approvals/questions, per-kind answering, must-reply, busyMode
 node test/integration/config-and-grouping.mjs      # 34 checks: config route, presets, grouping, delivery, hot reload
+node test/integration/schedule-tools.mjs           # 14 checks: schedule creation, reading, updates, delivery
 node test/mcp-conformance-test.mjs                 # 26 checks: protocol versions, methods, errors, auth
-node test/client-half-test.mjs         # 38 checks: the browser half's bundle page, its row page, its route
+node test/client-half-test.mjs         # 40 checks: the browser half's bundle page, its row page, its route
 node test/streaming-transport-test.mjs  # 5 checks: the JSON reply, the SSE reply with keep-alives, a JSON-only client, a streamed error
 node test/stdio-stream-test.mjs         # 3 checks: the bridge parses an event stream and re-reads the endpoint file
 node test/stdio-bridge-test.mjs        # 4 checks, needs a RUNNING Harness (one real delegated turn)

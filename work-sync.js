@@ -16,6 +16,7 @@
 import { assistantTextOf } from './lib/dsh-contracts.js'
 import { SYNC_MESSAGE_KIND, createInternalDelivery } from './lib/dsh-delivery.js'
 import { createWorkSync } from './lib/work-sync.js'
+import { evaluateWorkSync } from './lib/work-sync-evaluator.js'
 
 /** This row's plugin name, as the profile's bundle row spells it. */
 export const name = 'dsh-work-sync'
@@ -76,6 +77,7 @@ export function apply(ctx, config = {}) {
     settings,
     logger: log,
     listSessions: () => sessionRows(ctx),
+    evaluate: (request) => evaluateWorkSync({ ctx, ...request }),
     deliver: (sessionId, message) => delivery.deliver(sessionId, message?.text, message?.meta),
     readAssistant: assistantTextOf,
     now: () => Date.now(),

@@ -73,7 +73,7 @@ leaves unset; an explicit field always wins:
 | `createGroups` | `false` | Let this endpoint invent a sidebar project for a directory that has none. Off by default: automation does not grow the sidebar on its own, and a Session whose directory has no project stays in Ungrouped. |
 | `busyMode` | `setting` | Delivery to a session that is already running: `setting` follows the deployment's own `ui-conversation.busyEnter`, `queue` always waits for the next turn, `steer` always injects mid-turn. A caller's `mode` argument wins over all three. |
 | `syncEntryId` | `dsh-work-sync` | Profile row the settings page writes the task-start sync switch to. |
-| `dsh-work-sync` → `syncOnStart` | `true` | **On the sync row**: when a task starts, ask the other agents working in the same workspace what they are doing and which files they are touching. The Plugins page switch saves this row. |
+| `dsh-work-sync` → `syncOnStart` | `true` | **On the sync row**: independently evaluate whether a starting task needs progress sync with agents in the same workspace. The Plugins page switch saves this row. |
 | `dsh-work-sync` → `syncCooldownMs` | `300000` | How long one session waits before asking the same peer again. |
 | `dsh-work-sync` → `syncWaitMs` | `120000` | How long a peer's report is awaited before the asker is told it is still working. |
 | `dsh-work-sync` → `syncMaxPeers` | `3` | How many peers one round may ask. |
