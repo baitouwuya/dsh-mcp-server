@@ -82,6 +82,8 @@ exported.apply(ctx)
 
 assert.match(insertedStyles.join('\n'), /\.dsh-mcp-trigger-head \{[^}]*box-sizing: border-box;/, 'the trigger header keeps its disclosure arrow inside the card')
 checks.push('the wake-card header box model keeps the disclosure arrow inside the card')
+assert.match(insertedStyles.join('\n'), /\.dsh-mcp-trigger-title \{[^}]*flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;/, 'the title can shrink before it pushes the clock and disclosure out of the card')
+checks.push('a long wake-card title yields space to the clock and disclosure')
 
 assert.equal(registrations.length, 4, 'the client half registers the bundle page, the row page, the wake card and the origin line')
 const page = registrations.find((entry) => entry.options.name === 'plugins.row.config')
