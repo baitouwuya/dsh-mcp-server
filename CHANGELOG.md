@@ -3,6 +3,25 @@
 Notable changes to `dsh-mcp-btwy`. Older releases are listed on
 [GitHub Releases](https://github.com/baitouwuya/dsh-mcp-server/releases).
 
+## [1.2.3] - 2026-11-13
+
+### Changed
+
+- Task-start progress sync now uses a separate, tool-free model request to decide which running peers
+  in the same workspace need coordination. It uses the current turn's model and recent messages; a
+  failed or expired evaluation sends no notification.
+
+### Fixed
+
+- Keep the wake-card disclosure arrow inside its border, including when a long title is displayed in
+  a narrow layout.
+
+### Checks
+
+- 324 offline checks, plus the documentation guard. In a local DSH installation, a real model selected
+  a peer working on the same file, and the notice and progress report reached both sessions. The desktop
+  wake card's disclosure was also checked by expanding and collapsing it.
+
 ## [1.2.2] - 2026-11-11
 
 ### Added
