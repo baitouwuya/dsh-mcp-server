@@ -11,8 +11,16 @@ import { createDshCapabilities } from '../lib/dsh-capabilities.js'
 
 const checks = []
 
-/** A Harness whose one session is busy and emits two turns. */
-function harness() {
+const twoTurns = [
+  { type: 'assistant/message', seq: 2, data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: 'old turn text' }] } } },
+  { type: 'turn/end', seq: 3, data: { turn: 1, reason: { kind: 'completed' } } },
+  { type: 'turn/start', seq: 4, data: { turn: 2 } },
+  { type: 'assistant/message', seq: 5, data: { turn: 2, step: 1, message: { content: [{ type: 'text', text: 'queued answer' }] } } },
+  { type: 'turn/end', seq: 6, data: { turn: 2, reason: { kind: 'completed' } } },
+]
+
+/** A Harness whose one session is busy and follows the supplied frames. */
+function harness(frames = twoTurns.map((event) => ({ type: 'event', event }))) {
   const events = [{ type: 'turn/start', seq: 1, data: { turn: 1 } }]
   const services = {
     agents: { get: () => ({ status: 'running', steer() {}, followup() {} }) },
@@ -20,11 +28,7 @@ function harness() {
       list: async () => ({ items: [{ sessionId: 's1', running: true, cwd: '/tmp' }] }),
       prompt: async () => {},
       follow: () => (async function* stream() {
-        yield { type: 'event', event: { type: 'assistant/message', seq: 2, data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: 'old turn text' }] } } } }
-        yield { type: 'event', event: { type: 'turn/end', seq: 3, data: { turn: 1, reason: { kind: 'completed' } } } }
-        yield { type: 'event', event: { type: 'turn/start', seq: 4, data: { turn: 2 } } }
-        yield { type: 'event', event: { type: 'assistant/message', seq: 5, data: { turn: 2, step: 1, message: { content: [{ type: 'text', text: 'queued answer' }] } } } }
-        yield { type: 'event', event: { type: 'turn/end', seq: 6, data: { turn: 2, reason: { kind: 'completed' } } } }
+        for (const frame of frames) yield frame
       })(),
     },
     sessionQuery: { readSession: async () => ({ events, session: { cwd: '/tmp' } }) },
@@ -57,6 +61,28 @@ const steered = await harness().callTool('dsh_continue_session', {
 assert.equal(steered.structuredContent.status, 'completed')
 assert.match(steered.structuredContent.text, /old turn text/, 'a steered prompt reports the turn it joined')
 checks.push('a steered prompt still reports the turn it joined')
+
+const snapshot = [{ type: 'snapshot', records: twoTurns.map((event) => ({ type: 'event', event })) }]
+const snapshotQueued = await harness(snapshot).callTool('dsh_continue_session', {
+  sessionId: 's1', prompt: 'queued prompt', mode: 'queue', wait: true, timeoutMs: 5000,
+}, {})
+assert.equal(snapshotQueued.structuredContent.status, 'completed')
+assert.match(snapshotQueued.structuredContent.text, /queued answer/)
+assert.doesNotMatch(snapshotQueued.structuredContent.text, /old turn text/)
+checks.push('a snapshot respects the queued turn boundary')
+
+const errorSnapshot = [{ type: 'snapshot', records: [
+  { type: 'event', event: { type: 'turn/end', seq: 2, data: { turn: 1, reason: { kind: 'error' } } } },
+] }]
+const snapshotWait = await harness(errorSnapshot).callTool('dsh_wait_session', { sessionId: 's1', timeoutMs: 5000 }, {})
+assert.equal(snapshotWait.structuredContent.status, 'error')
+checks.push('a turn end already in the snapshot retains its error status')
+
+await assert.rejects(
+  harness([]).callTool('dsh_wait_session', { sessionId: 's1', timeoutMs: 5000 }, {}),
+  /ended before a turn\/end event/,
+)
+checks.push('a stream that closes before turn end reports an error')
 
 process.stdout.write('\n' + checks.length + ' turn-wait checks passed\n')
 for (const check of checks) process.stdout.write('ok - ' + check + '\n')

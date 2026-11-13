@@ -80,7 +80,7 @@ const world = [
   { sessionId: 'peer', running: true, cwd: '/work', updatedAt: 20 },
   { sessionId: 'idle', running: false, cwd: '/work', updatedAt: 30 },
   { sessionId: 'elsewhere', running: true, cwd: '/other', updatedAt: 40 },
-  { sessionId: 'child', running: true, cwd: '/work', updatedAt: 50, parentSessionId: 'asker' },
+  { sessionId: 'child', running: true, cwd: '/work', updatedAt: 50, parentSessionId: 'asker', origin: 'subagent' },
 ]
 const first = harness({ rows: world })
 await first.turn('asker')
@@ -94,7 +94,7 @@ const sub = harness({
   rows: [
     { sessionId: 'root', running: true, cwd: '/work', updatedAt: 10 },
     { sessionId: 'sibling', running: true, cwd: '/work', updatedAt: 20 },
-    { sessionId: 'child', running: true, cwd: '/work', updatedAt: 30, parentSessionId: 'root' },
+    { sessionId: 'child', running: true, cwd: '/work', updatedAt: 30, parentSessionId: 'root', origin: 'subagent' },
   ],
 })
 await sub.turn('child')
@@ -106,7 +106,7 @@ checks.push('a sub-agent asks its root and nothing else')
 const idleRoot = harness({
   rows: [
     { sessionId: 'root', running: false, cwd: '/work', updatedAt: 10 },
-    { sessionId: 'child', running: true, cwd: '/work', updatedAt: 30, parentSessionId: 'root' },
+    { sessionId: 'child', running: true, cwd: '/work', updatedAt: 30, parentSessionId: 'root', origin: 'subagent' },
   ],
 })
 await idleRoot.turn('child')
@@ -368,7 +368,7 @@ checks.push('an object refusal is treated as a refusal')
 const crossRoot = harness({
   rows: [
     { sessionId: 'a', running: true, cwd: '/work', updatedAt: 10 },
-    { sessionId: 'd', running: true, cwd: '/work', updatedAt: 20, parentSessionId: 'r' },
+    { sessionId: 'd', running: true, cwd: '/work', updatedAt: 20, parentSessionId: 'r', origin: 'subagent' },
     { sessionId: 'r', running: true, cwd: '/other', updatedAt: 30 },
   ],
 })
@@ -378,7 +378,7 @@ assert.deepEqual(ids(crossRoot.delivered), [], 'a root is judged by its own work
 checks.push('a root in another workspace is never asked, even through its sub-agent')
 
 const missingParent = harness({
-  rows: [{ sessionId: 'child', running: true, cwd: '/work', parentSessionId: 'gone' }],
+  rows: [{ sessionId: 'child', running: true, cwd: '/work', parentSessionId: 'gone', origin: 'subagent' }],
 })
 await missingParent.turn('child')
 await missingParent.settle()
@@ -388,13 +388,27 @@ checks.push('a session whose ancestor is missing asks nobody')
 const fork = harness({
   rows: [
     { sessionId: 'base', running: true, cwd: '/work', updatedAt: 10 },
-    { sessionId: 'fork', running: true, cwd: '/work', updatedAt: 20, parentSessionId: 'base', origin: 'fork' },
+    { sessionId: 'fork', running: true, cwd: '/work', updatedAt: 20, parentSessionId: 'base' },
+    { sessionId: 'peer', running: true, cwd: '/work', updatedAt: 30 },
   ],
 })
 await fork.turn('fork')
 await fork.settle()
-assert.deepEqual(ids(fork.delivered), ['base'], 'a fork is top-level, not a subagent')
-checks.push('a fork is treated as a top-level session')
+assert.deepEqual(ids(fork.delivered), ['base', 'peer'], 'a historical fork is top-level, not a subagent')
+checks.push('a historical fork without origin is treated as a top-level session')
+
+const nested = harness({
+  rows: [
+    { sessionId: 'root', running: true, cwd: '/work', updatedAt: 10 },
+    { sessionId: 'child', running: true, cwd: '/work', updatedAt: 20, parentSessionId: 'root', origin: 'subagent' },
+    { sessionId: 'grandchild', running: true, cwd: '/work', updatedAt: 30, parentSessionId: 'child', origin: 'subagent' },
+    { sessionId: 'peer', running: true, cwd: '/work', updatedAt: 40 },
+  ],
+})
+await nested.turn('grandchild')
+await nested.settle()
+assert.deepEqual(ids(nested.delivered), ['root'], 'a nested subagent asks its top-level session only')
+checks.push('a nested subagent resolves its top-level session')
 
 // --- overlapping rounds -----------------------------------------------------
 const overlap = harness({ rows: world })
@@ -439,9 +453,9 @@ checks.push('a repeated turn/start asks once, and the record names its asker and
 const fanIn = harness({
   rows: [
     { sessionId: 'root', running: true, cwd: '/work', updatedAt: 10 },
-    { sessionId: 'kid-1', running: true, cwd: '/work', updatedAt: 11, parentSessionId: 'root' },
-    { sessionId: 'kid-2', running: true, cwd: '/work', updatedAt: 12, parentSessionId: 'root' },
-    { sessionId: 'kid-3', running: true, cwd: '/work', updatedAt: 13, parentSessionId: 'root' },
+    { sessionId: 'kid-1', running: true, cwd: '/work', updatedAt: 11, parentSessionId: 'root', origin: 'subagent' },
+    { sessionId: 'kid-2', running: true, cwd: '/work', updatedAt: 12, parentSessionId: 'root', origin: 'subagent' },
+    { sessionId: 'kid-3', running: true, cwd: '/work', updatedAt: 13, parentSessionId: 'root', origin: 'subagent' },
   ],
 })
 await fanIn.turn('kid-1')

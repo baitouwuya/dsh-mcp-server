@@ -333,13 +333,17 @@ const detached = await call('dsh_run_prompt', {
 assert.equal(detached.status, 'started')
 await sleep(4000)
 const detachedWait = await call('dsh_wait_session', { sessionId: detached.sessionId, timeoutMs: 5000, limit: 2 })
-assert.ok(['completed', 'timedOut'].includes(detachedWait.status), `unexpected wait status ${detachedWait.status}`)
+assert.ok(['completed', 'timedOut', 'idle'].includes(detachedWait.status), `unexpected wait status ${detachedWait.status}`)
+const stillRunning = await call('dsh_list_sessions', { query: detached.sessionId, running: true, limit: 1 })
+if (stillRunning.count > 0) assert.equal(detachedWait.status, 'timedOut')
 oh('dsh_wait_session follows a detached turn without cancelling it')
-const cancelled = await call('dsh_cancel_session', { sessionId: detached.sessionId })
-assert.equal(cancelled.status, 'cancel-requested')
+if (stillRunning.count > 0) {
+  const cancelled = await call('dsh_cancel_session', { sessionId: detached.sessionId })
+  assert.equal(cancelled.status, 'cancel-requested')
+}
 const detachedTranscript = await call('dsh_read_session', { sessionId: detached.sessionId, limit: 0 })
 assert.ok(detachedTranscript.totalMessages >= 1)
-oh('wait:false starts detached, dsh_cancel_session cancels it, transcript stays readable')
+oh('wait:false starts detached, and its transcript stays readable')
 
 // --- error paths ------------------------------------------------------------
 const unknownTool = (await rpc('tools/call', { name: 'dsh_does_not_exist', arguments: {} })).body

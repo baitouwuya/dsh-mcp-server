@@ -72,6 +72,21 @@ try {
     assert.deepEqual(cancelledSessions(), [])
   })
 
+  setHang('close')
+  const cleanCeiling = await call('dsh_wait_session', { sessionId: sessionIdFromRun, timeoutMs: 1000 })
+  await check('a waiter reports timedOut when the host closes its stream on abort', () => {
+    assert.equal(cleanCeiling.status, 'timedOut')
+    assert.equal(cleanCeiling.running, true)
+    assert.deepEqual(cancelledSessions(), [])
+  })
+
+  const cleanPromptCeiling = await call('dsh_continue_session', { sessionId: sessionIdFromRun, prompt: PROMPT, timeoutMs: 1000 })
+  await check('a waited prompt reports timeout when the host closes its stream on abort', () => {
+    assert.equal(cleanPromptCeiling.status, 'timeout')
+    assert.match(cleanPromptCeiling.note, /still running/)
+    assert.deepEqual(cancelledSessions(), [])
+  })
+
   setHang(false)
   setRunning(false)
 

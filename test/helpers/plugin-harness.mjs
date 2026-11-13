@@ -258,10 +258,11 @@ export function makeServices() {
       if (hang) {
         // A turn that never ends on its own: only the caller's ceiling stops the wait.
         const snapshot = { type: 'snapshot', header: { id: currentSessionId }, cursor: 0, records: [], hasMore: false }
+        const closeOnAbort = hang === 'close'
         return (async function* stream() {
           yield snapshot
-          await new Promise((_resolve, reject) => {
-            const abort = () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))
+          await new Promise((resolve, reject) => {
+            const abort = () => closeOnAbort ? resolve() : reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))
             if (signal?.aborted) return abort()
             signal?.addEventListener('abort', abort, { once: true })
           })
