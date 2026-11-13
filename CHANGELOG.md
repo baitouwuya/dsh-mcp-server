@@ -3,7 +3,7 @@
 Notable changes to `dsh-mcp-btwy`. Older releases are listed on
 [GitHub Releases](https://github.com/baitouwuya/dsh-mcp-server/releases).
 
-## [Unreleased]
+## [1.2.4] - 2026-11-13
 
 ### Fixed
 
