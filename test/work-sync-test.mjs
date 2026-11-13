@@ -395,6 +395,27 @@ const fork = harness({
 await fork.turn('fork')
 await fork.settle()
 assert.deepEqual(ids(fork.delivered), ['base', 'peer'], 'a historical fork is top-level, not a subagent')
+
+const forkPeer = harness({
+  rows: [
+    { sessionId: 'base', running: true, cwd: '/work', updatedAt: 10 },
+    { sessionId: 'fork', running: true, cwd: '/work', updatedAt: 20, parentSessionId: 'base' },
+    { sessionId: 'peer', running: true, cwd: '/work', updatedAt: 30 },
+  ],
+})
+await forkPeer.turn('peer')
+await forkPeer.settle()
+assert.deepEqual(ids(forkPeer.delivered), ['base', 'fork'], 'a historical fork is an independent candidate')
+
+const forkWithMissingParent = harness({
+  rows: [
+    { sessionId: 'fork', running: true, cwd: '/work', parentSessionId: 'gone' },
+    { sessionId: 'peer', running: true, cwd: '/work' },
+  ],
+})
+await forkWithMissingParent.turn('fork')
+await forkWithMissingParent.settle()
+assert.deepEqual(ids(forkWithMissingParent.delivered), ['peer'], 'a historical fork does not depend on its old parent')
 checks.push('a historical fork without origin is treated as a top-level session')
 
 const nested = harness({
