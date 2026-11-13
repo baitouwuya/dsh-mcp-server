@@ -38,7 +38,7 @@ disk**: everything this plugin persists is its own state (`$DSH_HOME/mcp/*.json`
 ## DSH compatibility
 
 The bundle imports no DSH package, so compatibility is a question of service contracts rather than a
-version pin. It is checked against **DSH 0.2.2-rc.1** (Cordis 4.1.0) on the live Harness: the session
+version pin. Current source is checked against **DSH 0.2.2-rc.2** (Cordis 4.1.0) on the live Harness: the session
 controller (`list`, `resolveAgent`, `create`, `cancel`, `follow`, `selectModel`), `sessionQuery`,
 the live `agents` registry and its handle methods (`followup`, `steer`, `inject`), `permissionPresets`,
 `commands`, `workspaceRegistry`, `configEditor`, `clientModules`, the web-server route, the
@@ -80,13 +80,13 @@ node test/authority-test.mjs           # 5 checks: the sandbox ladder, containme
 node test/transcript-test.mjs          # 16 checks: message/event windows, cursors, maxChars:0 and the response budget
 node test/questions-test.mjs           # 17 checks: must-reply ids, injected id-only reminders, human stops, answers, deadlines, aborts, deadlocks
 node test/work-sync-evaluator-test.mjs # 4 checks: independent model decision and peer selection
-node test/work-sync-test.mjs           # 29 checks: the progress-sync engine against a fake Harness
+node test/work-sync-test.mjs           # 30 checks: the progress-sync engine against a fake Harness
 node test/work-sync-plugin-test.mjs    # 5 checks: the sync bundle row's service, messages, switch, disposal
-node test/turn-wait-test.mjs          # 2 checks: which turn a queued or steered prompt reports
+node test/turn-wait-test.mjs          # 5 checks: turn boundaries, snapshots and stream closure
 node test/integration/protocol-and-tools.mjs       # 32 checks: apply(), endpoint file, tools, status, the
                                                    # lazy front door, its authority ceiling, the reserved
                                                    # presets, lossless values
-node test/integration/sessions-and-identity.mjs    # 20 checks: waiting, whoami, ownership, restrictToOwner
+node test/integration/sessions-and-identity.mjs    # 22 checks: waiting, whoami, ownership, restrictToOwner
 node test/integration/archive-permissions-commands.mjs # 24 checks: archive, permissions, models, commands
 node test/integration/transcripts.mjs              # 11 checks: outline/tail/paging, index, search, budget
 node test/integration/decisions.mjs                # 20 checks: parked approvals/questions, per-kind answering, must-reply, busyMode

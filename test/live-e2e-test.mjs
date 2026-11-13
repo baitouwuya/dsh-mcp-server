@@ -4,8 +4,8 @@
  * another harness: protocol handshake, resources, every tool, and the error
  * paths an external client will hit.
  *
- * It performs four real delegated turns (two waited, one continuation, one
- * detached + cancelled), so it needs a live Harness with the plugin active.
+ * It performs four real delegated turns (three waited and one detached), so it
+ * needs a live Harness with the plugin active.
  * Run: node test/live-e2e-test.mjs
  */
 import { readFileSync } from 'node:fs'

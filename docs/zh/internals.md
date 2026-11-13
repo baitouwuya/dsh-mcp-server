@@ -32,7 +32,7 @@
 
 ## DSH 兼容性
 
-插件包不导入任何 DSH 包，因此兼容性取决于服务契约，而不是版本锁定。它已在运行中的 Harness 上针对 **DSH 0.2.2-rc.1**（Cordis 4.1.0）做过验证：会话控制器（`list`、`resolveAgent`、`create`、`cancel`、`follow`、`selectModel`）、`sessionQuery`、实时的 `agents` 注册表及其句柄方法（`followup`、`steer`、`inject`）、`permissionPresets`、`commands`、`workspaceRegistry`、`configEditor`、`clientModules`、Web 服务器路由、`session/event` 的形态与回合结束原因，以及 Web 模块加载器的种子（`react`、`@deepseek-ai/dsh-client-ui-primitives`、`…-ui-slots` 等）与 `plugins.row.config` / `plugins.bundle.config` 槽位键。
+插件包不导入任何 DSH 包，因此兼容性取决于服务契约，而不是版本锁定。当前源码已在运行中的 Harness 上针对 **DSH 0.2.2-rc.2**（Cordis 4.1.0）做过验证：会话控制器（`list`、`resolveAgent`、`create`、`cancel`、`follow`、`selectModel`）、`sessionQuery`、实时的 `agents` 注册表及其句柄方法（`followup`、`steer`、`inject`）、`permissionPresets`、`commands`、`workspaceRegistry`、`configEditor`、`clientModules`、Web 服务器路由、`session/event` 的形态与回合结束原因，以及 Web 模块加载器的种子（`react`、`@deepseek-ai/dsh-client-ui-primitives`、`…-ui-slots` 等）与 `plugins.row.config` / `plugins.bundle.config` 槽位键。
 
 有一条 Harness 规则对所有响应 `session/event` 的插件都很重要：监听器运行在**会话的追加提交内部**，此时嵌套追加会被拒绝（`session append cannot reenter while another append is being published`）。本插件包从监听器发出的每次投递——必须回复型提醒的注入或撤回、work-sync 的报告或超时提示——都会在投递前让出一个微任务，确保提交已经先关闭。
 
@@ -55,13 +55,13 @@ node test/authority-test.mjs           # 5 checks: the sandbox ladder, containme
 node test/transcript-test.mjs          # 16 checks: message/event windows, cursors, maxChars:0 and the response budget
 node test/questions-test.mjs           # 17 checks: must-reply ids, injected id-only reminders, human stops, answers, deadlines, aborts, deadlocks
 node test/work-sync-evaluator-test.mjs # 4 checks: independent model decision and peer selection
-node test/work-sync-test.mjs           # 29 checks: the progress-sync engine against a fake Harness
+node test/work-sync-test.mjs           # 30 checks: the progress-sync engine against a fake Harness
 node test/work-sync-plugin-test.mjs    # 5 checks: the sync bundle row's service, messages, switch, disposal
-node test/turn-wait-test.mjs          # 2 checks: which turn a queued or steered prompt reports
+node test/turn-wait-test.mjs          # 5 checks: turn boundaries, snapshots and stream closure
 node test/integration/protocol-and-tools.mjs       # 32 checks: apply(), endpoint file, tools, status, the
                                                    # lazy front door, its authority ceiling, the reserved
                                                    # presets, lossless values
-node test/integration/sessions-and-identity.mjs    # 20 checks: waiting, whoami, ownership, restrictToOwner
+node test/integration/sessions-and-identity.mjs    # 22 checks: waiting, whoami, ownership, restrictToOwner
 node test/integration/archive-permissions-commands.mjs # 24 checks: archive, permissions, models, commands
 node test/integration/transcripts.mjs              # 11 checks: outline/tail/paging, index, search, budget
 node test/integration/decisions.mjs                # 20 checks: parked approvals/questions, per-kind answering, must-reply, busyMode

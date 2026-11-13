@@ -3,6 +3,20 @@
 Notable changes to `dsh-mcp-btwy`. Older releases are listed on
 [GitHub Releases](https://github.com/baitouwuya/dsh-mcp-server/releases).
 
+## [Unreleased]
+
+### Fixed
+
+- Report a timeout when the Host closes a follow stream on abort, and process turn boundaries in
+  the opening snapshot so queued turns and their end reasons are not misreported.
+- Treat historical fork sessions without an `origin` as roots for progress sync, while following
+  explicitly marked subagents to their root.
+
+### Checks
+
+- 330 offline checks and the documentation guard. On DSH 0.2.2-rc.2, the 46 live HTTP and 4 stdio
+  checks passed; timeout handling and progress-sync delivery were also exercised with real sessions.
+
 ## [1.2.3] - 2026-11-13
 
 ### Changed
