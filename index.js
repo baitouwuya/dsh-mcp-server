@@ -535,7 +535,12 @@ export function apply(ctx, config = {}) {
         return false
       }
     }
-    return false
+    // No `Origin`, so fall back to what the browser says about the request's
+    // relation to this page. A same-origin GET legitimately carries no `Origin`,
+    // and refusing it locks the settings page out of its own route; `cross-site`
+    // was already refused above, and `same-site` is another origin on the same
+    // site, which has no business driving this listener.
+    return site === 'same-origin' || site === 'none'
   }
 
   const handler = createMcpHttpHandler({
