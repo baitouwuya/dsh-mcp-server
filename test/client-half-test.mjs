@@ -60,6 +60,17 @@ assert.deepEqual(exported.inject, ['slots', 'locale'])
 assert.equal(typeof exported.apply, 'function')
 checks.push('the client half requires React and the Harness UI primitives, nothing else')
 
+// The task-start sync switch is written into another bundle row. When that row is
+// not attached the Host refuses the write by design, and one refused field takes
+// the whole save with it - so the page must not offer the control at all.
+assert.equal(exported.syncSwitchOffered({ sync: { present: false } }), false,
+  'a detached sync row means the page offers no switch for it')
+assert.equal(exported.syncSwitchOffered({ sync: { present: true } }), true,
+  'an attached row keeps the switch')
+assert.equal(exported.syncSwitchOffered(undefined), true,
+  'before the first read the page keeps its default rather than hiding a control')
+checks.push('the sync switch is offered only when the row that owns it is attached')
+
 // --- the row configuration page ----------------------------------------------
 const registrations = []
 const insertedStyles = []
