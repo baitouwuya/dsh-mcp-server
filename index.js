@@ -25,6 +25,7 @@ import { createMcpHttpHandler } from './lib/http-route.js'
 import { createInternalDelivery, MCP_MESSAGE_KIND } from './lib/dsh-delivery.js'
 import { createQuestionBroker } from './lib/questions.js'
 import { McpGateway, SERVER_NAME } from './lib/protocol.js'
+import { createUploadRouteHandler, createUploadStore, ROUTE_PREFIX } from './lib/file-upload.js'
 import { registerDshTools } from './lib/dsh-tools-bridge.js'
 import { groupOwnedSessions } from './lib/workspace-grouping.js'
 import { errorText, sessionIdOf } from './lib/dsh-contracts.js'
@@ -432,8 +433,15 @@ export function apply(ctx, config = {}) {
     return config.syncOnStart !== false
   }
 
+  const uploadStore = createUploadStore({
+    getAttachments: () => ctx.get('attachments'),
+    config,
+    logger: log,
+  })
+
   const capabilities = createDshCapabilities(ctx, {
     logger: log,
+    uploadStore,
     sessionOwners: clients,
     restrictToOwner,
     answerUserRequests,
@@ -472,8 +480,24 @@ export function apply(ctx, config = {}) {
     dshToolsState.via = registered.via
   }
 
+  // `supported` is read when `initialize` answers, not when the plugin loads:
+  // the attachment service may register after this plugin does.
+  const fileUploadMeta = {
+    get supported() {
+      return uploadStore.available
+    },
+    prepareTool: 'dsh_prepare_upload',
+    method: 'PUT',
+    maxFileBytes: uploadStore.limits.maxFileBytes,
+    maxFiles: uploadStore.limits.maxFiles,
+    uploadTtlMs: uploadStore.limits.ttlMs,
+    fileIdTtlMs: uploadStore.limits.fileIdTtlMs,
+    requireSha256: uploadStore.limits.requireSha256,
+  }
+
   const gateway = new McpGateway({
     serverInfo: { name: SERVER_NAME, title: 'DeepSeek Harness MCP Server', version: VERSION },
+    meta: { [SERVER_NAME]: { fileUpload: fileUploadMeta } },
     instructions: typeof config.instructions === 'string' && config.instructions ? config.instructions : INSTRUCTIONS,
     listTools: () => capabilities.tools,
     callTool: (toolName, args, context) => capabilities.callTool(toolName, args, context),
@@ -587,6 +611,12 @@ export function apply(ctx, config = {}) {
   })()
 
   const disposeRoute = ctx.webServer.register({ kind: 'exact', path, handler })
+
+  const disposeUploadRoute = ctx.webServer.register({
+    kind: 'prefix',
+    path: ROUTE_PREFIX.slice(0, -1),
+    handler: createUploadRouteHandler({ store: uploadStore, logger: log }),
+  })
 
   /**
    * Whether the Web client half is being served for this package.
@@ -944,6 +974,8 @@ export function apply(ctx, config = {}) {
 
   ctx.effect(() => () => {
     try {
+      disposeUploadRoute()
+      uploadStore.dispose()
       disposeRoute()
     } catch (error) {
       log('debug', 'route disposal failed', { error: error instanceof Error ? error.message : String(error) })

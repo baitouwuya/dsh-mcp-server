@@ -80,6 +80,15 @@ leaves unset; an explicit field always wins:
 | `maxBodyBytes` | `8388608` | Request body ceiling of the MCP endpoint. |
 | `configMaxBodyBytes` | `4096` | Request body ceiling of the loopback configuration route. Separate from `maxBodyBytes` on purpose: that route only ever receives a switch patch, so it keeps a much smaller ceiling. Clamped to 1 KB - 1 MB; a value outside the range (or a non-number) is ignored. |
 | `instructions` | built-in text | Replaces the instructions handed to the calling model. |
+| `uploadMaxFiles` | `10` | How many upload links one `dsh_prepare_upload` mints (also the `fileIds` ceiling, clamped to 20). |
+| `uploadMaxFileBytes` | `20971520` | Byte ceiling for one upload (20 MiB). |
+| `uploadMaxBytes` | `67108864` | Byte ceiling for one mint (64 MiB). |
+| `uploadGlobalBytes` | `268435456` | Aggregate budget for in-flight plus stored files (256 MiB); past it new mints are refused. |
+| `uploadTtlMs` | `300000` | How long an upload link lives: from minting to the **first success** (5 minutes). Retries after a failure do not consume the slot. |
+| `fileIdTtlMs` | `3600000` | How long a stored `fileId` stays referenceable (1 hour); after that `dsh_run_prompt` refuses it. |
+| `uploadRequireSha256` | `false` | Require the mint to declare `sha256` and the bytes to match. Off by default; bytes are still checked for magic number and dimensions. |
+| `uploadMaxAttempts` | `3` | How many **content-level** failures (magic number, sha256, dimensions) one link tolerates before it is burned. |
+| `trustProxyHeaders` | `false` | Whether to trust `X-Forwarded-Host`/`-Proto` when building upload URLs. Off by default (`Host`). Turn it on behind a proxy that rewrites `Host`, or pass `clientBaseUrl`. |
 
 Example row:
 

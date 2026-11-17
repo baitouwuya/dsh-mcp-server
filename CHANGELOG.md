@@ -3,6 +3,26 @@
 Notable changes to `dsh-mcp-btwy`. Older releases are listed on
 [GitHub Releases](https://github.com/baitouwuya/dsh-mcp-server/releases).
 
+## [Unreleased]
+
+### Added
+
+- **File transport.** The MCP protocol has no client-to-server path for bytes, so a harness that can
+  only run a shell command had no way to show this side an image. Two tools close it:
+  `dsh_prepare_upload` mints one short-lived `PUT` link per file, and `dsh_run_prompt(fileIds)` carries
+  the stored images into the message as `image` parts; `dsh_read_attachment` returns an image an event
+  already recorded as an MCP `image` content block, so the traffic works in both directions.
+- `initialize` advertises the upload shape under `_meta`, and `dsh_status.upload` reports the limits, so
+  a client learns the contract without a probe.
+- Uploaded bytes are validated against their declared media type (magic number, dimensions, optional
+  sha256) and go straight into the Harness attachment service; nothing is written by this plugin.
+
+### Notes
+
+- `PUT` is authorised by the nonce in the link, not the endpoint token, so a `curl -T` works; the link
+  expires after the first successful store, and a failed attempt does not consume it.
+- The dispatch route is registered as a prefix (`/mcp-files/…`) for the same reason.
+
 ## [1.2.4] - 2026-11-13
 
 ### Fixed

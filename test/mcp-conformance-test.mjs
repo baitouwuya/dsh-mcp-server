@@ -165,8 +165,8 @@ try {
   const toolList = await rpc({ jsonrpc: '2.0', id: 4, method: 'tools/list', params: {} })
   assert.equal(toolList.status, 200)
   const toolNames = toolList.body.result.tools.map((tool) => tool.name)
-  assert.equal(toolNames.length, 26, `tools/list must return exactly 26 tools, got ${toolNames.length}`)
-  assert.equal(new Set(toolNames).size, 26, 'tool names are unique')
+  assert.equal(toolNames.length, 28, `tools/list must return exactly 28 tools, got ${toolNames.length}`)
+  assert.equal(new Set(toolNames).size, 28, 'tool names are unique')
   for (const tool of toolList.body.result.tools) {
     assert.equal(typeof tool.name, 'string')
     assert.match(tool.name, /^dsh_/, 'every published MCP tool is a dsh_* tool')
@@ -175,7 +175,7 @@ try {
   }
   assert.ok(toolNames.includes('dsh_run_prompt'))
   assert.ok(toolNames.includes('dsh_mcp_call') === false, 'the local front door is not an MCP tool')
-  checks.push('tools/list returns exactly 26 well-formed dsh_* tool definitions')
+  checks.push('tools/list returns exactly 28 well-formed dsh_* tool definitions')
 
   const unknownTool = await rpc({
     jsonrpc: '2.0',
@@ -302,7 +302,7 @@ try {
     { headers: { 'mcp-session-id': 'client-chosen-session', 'mcp-protocol-version': '2025-06-18' } },
   )
   assert.equal(withSession.status, 200)
-  assert.equal(withSession.body.result.tools.length, 26)
+  assert.equal(withSession.body.result.tools.length, 28)
   assert.equal(withSession.headers.get('mcp-session-id'), null)
   checks.push('a client-supplied Mcp-Session-Id is accepted and ignored by this stateless endpoint')
 
