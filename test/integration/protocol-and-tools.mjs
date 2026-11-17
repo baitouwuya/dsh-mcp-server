@@ -66,7 +66,7 @@ try {
   const status = await call('dsh_status', {})
   await check('dsh_status reports the default model, tool names, and permission presets', () => {
     assert.equal(status.defaultModel.model, 'deepseek-v4.1-flash-anthropic')
-    assert.equal(status.toolNames.length, 26)
+    assert.equal(status.toolNames.length, 28)
     assert.equal(status.defaultPermissionPreset, 'workspace-write')
     assert.deepEqual(status.permissionPresets.map((option) => option.value), ['read-only', 'workspace-write', 'danger-full-access'])
   })
@@ -79,7 +79,7 @@ try {
   // --- the DSH-facing tool surface ---------------------------------------------
   const listed = await rpc({ jsonrpc: '2.0', id: h.nextId(), method: 'tools/list', params: {} })
   const mcpNames = listed.result.tools.map((tool) => tool.name).sort()
-  assert.equal(mcpNames.length, 26, 'the MCP endpoint publishes twenty-six tools')
+  assert.equal(mcpNames.length, 28, 'the MCP endpoint publishes twenty-eight tools')
   assert.ok(mcpNames.includes('dsh_open_session'), 'the GUI jump is part of the published table')
 
   // The default surface is the front door: three small schemas instead of
@@ -99,7 +99,7 @@ try {
   await check('dsh_status reports the surface mode, its size, and the served client page', () => {
     assert.equal(localStatus.dshTools.enabled, true)
     assert.equal(localStatus.dshTools.mode, 'lazy')
-    assert.equal(localStatus.dshTools.published, 26, 'every published tool stays openable')
+    assert.equal(localStatus.dshTools.published, 28, 'every published tool stays openable')
     assert.deepEqual(localStatus.dshTools.registered.slice().sort(), ['dsh_mcp_call', 'dsh_mcp_open', 'dsh_mcp_tools'])
     assert.equal(localStatus.clientPage.available, true)
     assert.equal(localStatus.clientPage.inGraph, true)
@@ -126,11 +126,11 @@ try {
   const one = await metaCall('dsh_mcp_tools', { name: 'dsh_read_session' })
   const unknownLookup = await metaCall('dsh_mcp_tools', { name: 'nope' }).then(() => undefined, (error) => error)
   await check('the catalogue lists narrowly and returns one full schema on demand', () => {
-    assert.equal(catalogue.total, 26)
-    assert.equal(catalogue.count, 26)
+    assert.equal(catalogue.total, 28)
+    assert.equal(catalogue.count, 28)
     assert.equal(catalogue.tools.every((row) => row.native === false), true, 'nothing is native until it is opened')
     assert.ok(catalogue.tools.every((row) => row.purpose.length > 0 && row.purpose.length < 200), 'a catalogue row stays one line')
-    assert.ok(searched.count > 0 && searched.count < 26, 'a query narrows the catalogue')
+    assert.ok(searched.count > 0 && searched.count < 28, 'a query narrows the catalogue')
     assert.equal(one.name, 'dsh_read_session')
     assert.ok(one.parameters.properties.mode, 'a single lookup returns the parameter schema')
     assert.equal(one.parameters.properties.mode.minLength, undefined, 'the schema is projected for the registry')
@@ -181,7 +181,7 @@ try {
     assert.match(String(stringOpen && stringOpen.message), /must be an array of published names/)
     assert.match(String(emptyOpen && emptyOpen.message), /at least one published name/)
     assert.match(openParam, /bare name/, 'the parameter text matches the refusal, not the old "omit opens everything" promise')
-    assert.equal(wholeSet.native.length, 26, 'all: true is still the way to the whole table')
+    assert.equal(wholeSet.native.length, 28, 'all: true is still the way to the whole table')
   })
 
   // Opening is per agent: the registrations land in the calling agent's own

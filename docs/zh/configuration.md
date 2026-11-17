@@ -75,6 +75,15 @@
 | `maxBodyBytes` | `8388608` | MCP 端点的请求体上限。 |
 | `configMaxBodyBytes` | `4096` | 回环配置路由的请求体上限。有意与 `maxBodyBytes` 分开：该路由只会收到开关补丁，因此保持小得多的上限。会被钳制在 1 KB - 1 MB 之间；超出范围的值（或非数字）会被忽略。 |
 | `instructions` | 内置文本 | 替换交给调用方模型的说明文本。 |
+| `uploadMaxFiles` | `10` | 一次 `dsh_prepare_upload` 最多铸造多少个上传链接（也是 `fileIds` 的单次上限，夹在 20 以内）。 |
+| `uploadMaxFileBytes` | `20971520` | 单个上传的字节日志上限（20 MiB）。 |
+| `uploadMaxBytes` | `67108864` | 一次铸造的字节总量上限（64 MiB）。 |
+| `uploadGlobalBytes` | `268435456` | 在途与已存文件的总字节预算（256 MiB）；超出即拒绝新的铸造。 |
+| `uploadTtlMs` | `300000` | 上传链接的有效期：从铸造到**首次成功**为止（5 分钟）。失败重试不消耗槽位。 |
+| `fileIdTtlMs` | `3600000` | 已存 `fileId` 的可引用时长（1 小时），之后 `dsh_run_prompt` 拒绝它。 |
+| `uploadRequireSha256` | `false` | 要求铸造时声明 `sha256` 且上传字节必须匹配。默认关闭：字节仍会按魔数与尺寸校验。 |
+| `uploadMaxAttempts` | `3` | 同一条链接允许几次**内容级**失败（魔数/sha256/尺寸不符）；用完即作废。 |
+| `trustProxyHeaders` | `false` | 是否信任 `X-Forwarded-Host`/`-Proto` 来拼上传地址。默认关闭：用 `Host`。反代改写 `Host` 时打开它，或用调用方的 `clientBaseUrl`。 |
 
 示例行：
 

@@ -134,7 +134,7 @@ try {
     assert.equal(configRead.exposeToDsh, true)
     assert.equal(configRead.exposeToDshMode, 'lazy')
     assert.deepEqual([...configRead.registered].sort(), ['dsh_mcp_call', 'dsh_mcp_open', 'dsh_mcp_tools'])
-    assert.equal(configRead.published.length, 26)
+    assert.equal(configRead.published.length, 28)
     assert.equal(configRead.configPath, '/mcp-config')
     assert.equal(configRead.clientPage.inGraph, true)
     assert.equal(configRead.busyMode, 'setting')
@@ -327,7 +327,7 @@ try {
   const renderedObject = runPromptTool.output.render(undefined, { answer: 42 })[0].text
   const renderedString = runPromptTool.output.render(undefined, 'plain')[0].text
   await check('exposeToDshMode: full registers every published tool, projected for the registry', () => {
-    assert.equal(fullTools.length, 26, 'full mode registers the whole table')
+    assert.equal(fullTools.length, 28, 'full mode registers the whole table')
     assert.deepEqual(fullNames, mcpNames)
     assert.equal(runPromptTool.parameters.properties.prompt.minLength, undefined, 'unsupported keywords must be dropped')
     assert.deepEqual(runPromptTool.parameters.properties.wait, { type: 'boolean', description: 'Wait for the turn to finish (default true).' })
