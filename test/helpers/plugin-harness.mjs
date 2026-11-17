@@ -371,6 +371,9 @@ export function makeServices() {
       workspaceCalls.push({ op: 'resolve', path })
       return workspaces.find((workspace) => workspace.path === path)
     },
+    // The tool scope reads this to know which workspaces exist; without it the
+    // plugin reports the scope as unsupported, which is a different code path.
+    list() { return workspaces },
     async delete(id) {
       workspaceCalls.push({ op: 'delete', id })
       const index = workspaces.findIndex((workspace) => workspace.id === id)
@@ -638,6 +641,7 @@ export function makeServices() {
   return {
     services,
     webServer,
+    workspaceRegistry,
     getPrompt: () => pendingPrompt,
     setBusy: (value) => { busy = value },
     archivedIds: () => [...archived],
@@ -728,7 +732,9 @@ export async function createPluginHarness(options = {}) {
   const routes = webServer.registered
   const mcpRoute = routes.find((entry) => entry.path === '/mcp')
   const configRoute = routes.find((entry) => entry.path === '/mcp-config')
-  assert.equal(routes.length, 2, 'the plugin registers the MCP route and its configuration route')
+  const scopeRoute = routes.find((entry) => entry.path === '/mcp-scope')
+  assert.equal(routes.length, 3, 'the plugin registers the MCP route, its configuration route and the scope route')
+  assert.equal(scopeRoute?.kind, 'exact', 'the scope route answers one fixed path')
   assert.equal(mcpRoute.kind, 'exact')
   assert.equal(configRoute.kind, 'exact')
 
@@ -736,6 +742,7 @@ export async function createPluginHarness(options = {}) {
   const origin = 'http://127.0.0.1:' + server.address().port
   const address = origin + '/mcp'
   const configUrl = origin + '/mcp-config'
+  const scopeUrl = origin + '/mcp-scope'
 
   let id = 0
   const nextId = () => ++id
@@ -797,6 +804,7 @@ export async function createPluginHarness(options = {}) {
     server,
     address,
     configUrl,
+    scopeUrl,
     nextId,
     rpc,
     call,
