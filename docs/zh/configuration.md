@@ -86,3 +86,37 @@
         token: !!js process.env.DSH_MCP_TOKEN
         defaultCwd: /Users/me/work
 ```
+
+## 工具作用域（`toolScopeFile`）
+
+DSH 会话能看见本插件的工具，由一份**独立的作用域文档**决定，不写在 `cordis.patch.yml` 里：
+
+```json
+{ "version": 1, "mode": "selected", "workspaceIds": ["<工作区 id>", "…"] }
+```
+
+- 路径：`$DSH_HOME/mcp/tool-scope.json`（mode 0600，原子写）；用 `toolScopeFile` 可改到别处。
+- `mode: global`（缺省）＝ 所有工作区可见，与本特性引入前完全一致。
+- `mode: selected` ＝ 只有列出的工作区可见，其余工作区的会话**看不到这些工具**，也就不为它们的 schema 付上下文成本。
+- **读不出来一律收紧**：文档损坏、字段类型不对，都落到「谁都不给」，并在 `dsh_status.scope.notes`
+  与设置页上写明原因。**文件不存在只在第一次读时等于 `global`**；已经读到过文档之后再消失，
+  按「变了」处理（收紧为谁都不选并报 `scope-degraded`），不会悄悄放宽回 `global`。
+- **保存时不覆盖别人的改动**：写盘前在锁内比对盘上的 `updatedAt|writeId`（`writeId` 用来区分同一毫秒
+  的两次写）。盘上已被别处改过就返回 `409 scope-conflict`，**并立即重读盘上文档采纳赢家的值**，
+  同时要求页面先重新读一次（`GET`）才允许再保存——这样「盲目重试」被拒，「看过再改」放行；
+  **如果这次重读失败，闩保持关闭**，页面会继续被拒，直到真正读到盘上的值。
+  读盘失败无法核对时返回 `500 scope-write-unverified`，不盲写；写盘超时（可能已落盘）返回
+  `500 scope-write-unverified` 并丢弃基线，下次保存按冲突处理。插件已被替换则返回 `409 scope-disposed`，
+  锁被占用超过等待预算（8 秒）返回 `409 scope-lock-timeout`。
+- **锁**：写盘前在锁文件里记下持有者 `{token, pid}`，只删自己那把；抢占陈旧锁用 `rename` 原子认领，
+  并在认领后按 inode 回验，避免把别人刚建立的新锁删掉。陈旧窗 30 秒；窗内只有**锁上记的是本机、
+  且其 pid 返回 `ESRCH`**（确认已死）才提前回收——pid 在别的机器上没有意义，异机的锁绝不按 pid 回收，
+  正常的短暂持有也不会为此付出一次读盘。探针最多每 250ms 一次，所以**刚死掉的本机进程**通常
+  两三次探测内就被回收，不必等满窗口；没有 `host` 字段的旧锁按异机处理，等满 30 秒。
+- **Harness 没有 `workspaceRegistry` 时**：`selected` 无可选之物 ⇒ 谁都不给；
+  `global` 仍按原义全部可见（这时的作用域是空操作，不是中断）。状态里带 `scope-unsupported`。
+
+为什么不在 `cordis.patch.yml`：改那一行会重载插件，而重载会让正在跑的那一步已快照的工具集失效。
+作用域是运行期开关，改它不该打断进行中的对话。
+
+设置页的「工具作用域」一节就是这份文档的界面；`dsh_status.scope` 给出 `mode`/`workspaceIds`/`notes`/`unmatchedAgents`。
