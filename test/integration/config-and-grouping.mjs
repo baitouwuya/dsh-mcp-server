@@ -265,6 +265,21 @@ try {
     assert.match(String(oversizedBody.error), /2048/, 'the ceiling is the configured one, not the built-in default')
   })
 
+  // A browser omits `Origin` on its own same-origin GET, but still labels every
+  // request with `Sec-Fetch-Site`. Trusting only `Origin` therefore refuses the
+  // page the route exists to serve, while a command-line client (no headers at
+  // all) gets through — the one shape that cannot be wrong is the one that fails.
+  const withSite = (site) => fetch(configUrl, { headers: site === undefined ? {} : { 'sec-fetch-site': site } })
+  const [ownPage, sameSite, otherSite, plainClient] = await Promise.all([
+    withSite('same-origin'), withSite('same-site'), withSite('cross-site'), withSite(undefined),
+  ])
+  await check('a browser same-origin GET is admitted, while same-site and cross-site are refused', () => {
+    assert.equal(ownPage.status, 200, 'a same-origin GET legitimately carries no Origin')
+    assert.equal(sameSite.status, 403, 'another origin on the same site may not read the settings')
+    assert.equal(otherSite.status, 403)
+    assert.equal(plainClient.status, 200, 'a client that sends neither header is unaffected')
+  })
+
   // Undoing automation: a project registration can be dropped deliberately.
   const removeNow = async () => (await fetch(configUrl, {
     method: 'POST',
